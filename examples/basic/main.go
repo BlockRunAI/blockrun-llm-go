@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"log"
 
-	blockrun "github.com/blockrun/blockrun-llm-go"
+	blockrun "github.com/BlockRunAI/blockrun-llm-go"
 )
 
 func main() {

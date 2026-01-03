@@ -1,4 +1,4 @@
-module github.com/blockrun/blockrun-llm-go
+module github.com/BlockRunAI/blockrun-llm-go
 
 go 1.22
 

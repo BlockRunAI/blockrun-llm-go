@@ -5,7 +5,7 @@ Go SDK for [BlockRun](https://blockrun.ai) - access multiple LLM providers (Open
 ## Installation
 
 ```bash
-go get github.com/blockrun/blockrun-llm-go
+go get github.com/BlockRunAI/blockrun-llm-go
 ```
 
 ## Quick Start
