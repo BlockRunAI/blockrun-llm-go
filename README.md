@@ -63,9 +63,8 @@ client, err := blockrun.NewLLMClient("")
 // Or pass private key directly
 client, err := blockrun.NewLLMClient("0x...")
 
-// With custom options
+// With custom timeout (default: 60s)
 client, err := blockrun.NewLLMClient("0x...",
-    blockrun.WithAPIURL("https://custom.api.url"),
     blockrun.WithTimeout(120 * time.Second),
 )
 ```
