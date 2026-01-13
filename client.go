@@ -30,10 +30,18 @@ const (
 // SECURITY: Your private key is used ONLY for local EIP-712 signing.
 // The key NEVER leaves your machine - only signatures are transmitted.
 type LLMClient struct {
-	privateKey *ecdsa.PrivateKey
-	address    string
-	apiURL     string
-	httpClient *http.Client
+	privateKey      *ecdsa.PrivateKey
+	address         string
+	apiURL          string
+	httpClient      *http.Client
+	sessionTotalUSD float64
+	sessionCalls    int
+}
+
+// Spending represents session spending information.
+type Spending struct {
+	TotalUSD float64
+	Calls    int
 }
 
 // ClientOption is a function that configures an LLMClient.
@@ -170,6 +178,13 @@ func (c *LLMClient) ChatCompletion(model string, messages []ChatMessage, opts *C
 		if opts.TopP > 0 {
 			body["top_p"] = opts.TopP
 		}
+		// Handle xAI Live Search parameters
+		if opts.SearchParameters != nil {
+			body["search_parameters"] = opts.SearchParameters
+		} else if opts.Search {
+			// Simple shortcut: Search=true enables live search with defaults
+			body["search_parameters"] = map[string]string{"mode": "on"}
+		}
 	}
 	body["max_tokens"] = maxTokens
 
@@ -207,6 +222,84 @@ func (c *LLMClient) ListModels() ([]Model, error) {
 // GetWalletAddress returns the wallet address being used for payments.
 func (c *LLMClient) GetWalletAddress() string {
 	return c.address
+}
+
+// GetSpending returns session spending information.
+func (c *LLMClient) GetSpending() Spending {
+	return Spending{
+		TotalUSD: c.sessionTotalUSD,
+		Calls:    c.sessionCalls,
+	}
+}
+
+// ListImageModels returns the list of available image models with pricing.
+func (c *LLMClient) ListImageModels() ([]ImageModel, error) {
+	url := c.apiURL + "/v1/images/models"
+
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list image models: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    "Failed to list image models",
+		}
+	}
+
+	var result struct {
+		Data []ImageModel `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode image models response: %w", err)
+	}
+
+	return result.Data, nil
+}
+
+// ListAllModels returns a unified list of all available models (LLM and image).
+func (c *LLMClient) ListAllModels() ([]AllModel, error) {
+	// Get LLM models
+	llmModels, err := c.ListModels()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list LLM models: %w", err)
+	}
+
+	// Get image models
+	imageModels, err := c.ListImageModels()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list image models: %w", err)
+	}
+
+	// Combine into unified list
+	allModels := make([]AllModel, 0, len(llmModels)+len(imageModels))
+
+	for _, m := range llmModels {
+		allModels = append(allModels, AllModel{
+			ID:           m.ID,
+			Name:         m.Name,
+			Provider:     m.Provider,
+			Type:         "llm",
+			InputPrice:   m.InputPrice,
+			OutputPrice:  m.OutputPrice,
+			ContextLimit: m.ContextLimit,
+		})
+	}
+
+	for _, m := range imageModels {
+		allModels = append(allModels, AllModel{
+			ID:             m.ID,
+			Name:           m.Name,
+			Provider:       m.Provider,
+			Type:           "image",
+			PricePerImage:  m.PricePerImage,
+			SupportedSizes: m.SupportedSizes,
+		})
+	}
+
+	return allModels, nil
 }
 
 // requestWithPayment makes a request with automatic x402 payment handling.
@@ -341,6 +434,16 @@ func (c *LLMClient) handlePaymentAndRetry(url string, body []byte, resp *http.Re
 	var chatResp ChatResponse
 	if err := json.NewDecoder(retryResp.Body).Decode(&chatResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Track spending - convert amount from micro-USDC to USD
+	c.sessionCalls++
+	if amountStr := paymentOption.Amount; amountStr != "" {
+		// Amount is in micro-USDC (6 decimals), convert to USD
+		var amountMicro float64
+		if _, err := fmt.Sscanf(amountStr, "%f", &amountMicro); err == nil {
+			c.sessionTotalUSD += amountMicro / 1_000_000
+		}
 	}
 
 	return &chatResp, nil
