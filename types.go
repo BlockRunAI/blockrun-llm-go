@@ -18,19 +18,48 @@ type ChatMessage struct {
 
 // ChatCompletionOptions contains optional parameters for chat completion.
 type ChatCompletionOptions struct {
-	MaxTokens   int     `json:"max_tokens,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-	TopP        float64 `json:"top_p,omitempty"`
+	MaxTokens        int               `json:"max_tokens,omitempty"`
+	Temperature      float64           `json:"temperature,omitempty"`
+	TopP             float64           `json:"top_p,omitempty"`
+	Search           bool              `json:"-"` // Enable xAI Live Search (shortcut)
+	SearchParameters *SearchParameters `json:"search_parameters,omitempty"`
+}
+
+// SearchParameters contains xAI Live Search configuration.
+type SearchParameters struct {
+	Mode             string         `json:"mode,omitempty"` // "off", "auto", "on"
+	Sources          []SearchSource `json:"sources,omitempty"`
+	ReturnCitations  bool           `json:"return_citations,omitempty"`
+	FromDate         string         `json:"from_date,omitempty"` // YYYY-MM-DD
+	ToDate           string         `json:"to_date,omitempty"`   // YYYY-MM-DD
+	MaxSearchResults int            `json:"max_search_results,omitempty"`
+}
+
+// SearchSource represents a search source configuration.
+type SearchSource struct {
+	Type             string   `json:"type"` // "web", "x", "news", "rss"
+	Country          string   `json:"country,omitempty"`
+	ExcludedWebsites []string `json:"excluded_websites,omitempty"`
+	AllowedWebsites  []string `json:"allowed_websites,omitempty"`
+	SafeSearch       bool     `json:"safe_search,omitempty"`
+	// X-specific fields
+	IncludedXHandles  []string `json:"included_x_handles,omitempty"`
+	ExcludedXHandles  []string `json:"excluded_x_handles,omitempty"`
+	PostFavoriteCount int      `json:"post_favorite_count,omitempty"`
+	PostViewCount     int      `json:"post_view_count,omitempty"`
+	// RSS-specific fields
+	Links []string `json:"links,omitempty"`
 }
 
 // ChatResponse represents the API response for chat completions.
 type ChatResponse struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Created int64    `json:"created"`
-	Model   string   `json:"model"`
-	Choices []Choice `json:"choices"`
-	Usage   Usage    `json:"usage"`
+	ID        string   `json:"id"`
+	Object    string   `json:"object"`
+	Created   int64    `json:"created"`
+	Model     string   `json:"model"`
+	Choices   []Choice `json:"choices"`
+	Usage     Usage    `json:"usage"`
+	Citations []string `json:"citations,omitempty"` // xAI Live Search citation URLs
 }
 
 // Choice represents a single completion choice.
@@ -45,6 +74,7 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	NumSourcesUsed   int `json:"num_sources_used,omitempty"` // xAI Live Search sources used
 }
 
 // Model represents an available model from the API.
@@ -55,6 +85,23 @@ type Model struct {
 	InputPrice   float64 `json:"inputPrice"`   // per 1M tokens
 	OutputPrice  float64 `json:"outputPrice"`  // per 1M tokens
 	ContextLimit int     `json:"contextLimit"` // max tokens
+	Type         string  `json:"type,omitempty"` // "llm" or "image" (for listAllModels)
+}
+
+// AllModel represents a model from either LLM or image generation.
+// Used by ListAllModels() to return a unified list.
+type AllModel struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Provider      string   `json:"provider"`
+	Type          string   `json:"type"` // "llm" or "image"
+	// LLM-specific fields
+	InputPrice    float64  `json:"inputPrice,omitempty"`
+	OutputPrice   float64  `json:"outputPrice,omitempty"`
+	ContextLimit  int      `json:"contextLimit,omitempty"`
+	// Image-specific fields
+	PricePerImage float64  `json:"pricePerImage,omitempty"`
+	SupportedSizes []string `json:"supportedSizes,omitempty"`
 }
 
 // PaymentRequirement represents the x402 payment requirements from a 402 response.

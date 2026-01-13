@@ -211,3 +211,126 @@ func TestValidation(t *testing.T) {
 		t.Errorf("Unexpected error for valid temperature: %v", err)
 	}
 }
+
+func TestGetSpending(t *testing.T) {
+	client, err := NewLLMClient(testPrivateKey)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// Initial spending should be zero
+	spending := client.GetSpending()
+	if spending.TotalUSD != 0 {
+		t.Errorf("Expected initial TotalUSD 0, got %f", spending.TotalUSD)
+	}
+	if spending.Calls != 0 {
+		t.Errorf("Expected initial Calls 0, got %d", spending.Calls)
+	}
+}
+
+func TestListImageModels(t *testing.T) {
+	// Create a mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/images/models" {
+			t.Errorf("Expected path /v1/images/models, got %s", r.URL.Path)
+		}
+
+		models := struct {
+			Data []ImageModel `json:"data"`
+		}{
+			Data: []ImageModel{
+				{ID: "google/nano-banana", Name: "Nano Banana", Provider: "google", PricePerImage: 0.01, Available: true},
+				{ID: "openai/dall-e-3", Name: "DALL-E 3", Provider: "openai", PricePerImage: 0.04, Available: true},
+			},
+		}
+
+		json.NewEncoder(w).Encode(models)
+	}))
+	defer server.Close()
+
+	client, err := NewLLMClient(testPrivateKey, WithAPIURL(server.URL))
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	models, err := client.ListImageModels()
+	if err != nil {
+		t.Fatalf("Failed to list image models: %v", err)
+	}
+
+	if len(models) != 2 {
+		t.Errorf("Expected 2 image models, got %d", len(models))
+	}
+
+	if models[0].ID != "google/nano-banana" {
+		t.Errorf("Expected first model google/nano-banana, got %s", models[0].ID)
+	}
+}
+
+func TestListAllModels(t *testing.T) {
+	// Create a mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			models := struct {
+				Data []Model `json:"data"`
+			}{
+				Data: []Model{
+					{ID: "openai/gpt-4o", Name: "GPT-4o", Provider: "openai", InputPrice: 2.5, OutputPrice: 10.0},
+				},
+			}
+			json.NewEncoder(w).Encode(models)
+		case "/v1/images/models":
+			models := struct {
+				Data []ImageModel `json:"data"`
+			}{
+				Data: []ImageModel{
+					{ID: "google/nano-banana", Name: "Nano Banana", Provider: "google", PricePerImage: 0.01, Available: true},
+				},
+			}
+			json.NewEncoder(w).Encode(models)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewLLMClient(testPrivateKey, WithAPIURL(server.URL))
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	models, err := client.ListAllModels()
+	if err != nil {
+		t.Fatalf("Failed to list all models: %v", err)
+	}
+
+	if len(models) != 2 {
+		t.Errorf("Expected 2 total models, got %d", len(models))
+	}
+
+	// Check that we have both types
+	foundLLM := false
+	foundImage := false
+	for _, m := range models {
+		if m.Type == "llm" {
+			foundLLM = true
+			if m.ID != "openai/gpt-4o" {
+				t.Errorf("Expected LLM model openai/gpt-4o, got %s", m.ID)
+			}
+		}
+		if m.Type == "image" {
+			foundImage = true
+			if m.ID != "google/nano-banana" {
+				t.Errorf("Expected image model google/nano-banana, got %s", m.ID)
+			}
+		}
+	}
+
+	if !foundLLM {
+		t.Error("Expected to find LLM model")
+	}
+	if !foundImage {
+		t.Error("Expected to find image model")
+	}
+}
