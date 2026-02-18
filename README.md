@@ -75,11 +75,14 @@ client, err := blockrun.NewLLMClient("0x...",
 // Basic chat
 response, err := client.Chat("openai/gpt-4o", "What is the capital of France?")
 
+// Use Codex for coding tasks (cost-effective)
+response, err := client.Chat("openai/gpt-5.2-codex", "Write a binary search in Go")
+
 // Chat with system prompt
 response, err := client.ChatWithSystem(
-    "openai/gpt-4o",
-    "Tell me a joke",
-    "You are a comedian.",
+    "anthropic/claude-opus-4.6",
+    "Explain quantum computing",
+    "You are a physics professor.",
 )
 ```
 
@@ -120,15 +123,22 @@ fmt.Printf("Wallet: %s\n", address)
 
 ## Available Models
 
-BlockRun provides access to models from multiple providers:
+BlockRun provides access to 38+ models from multiple providers:
 
-| Provider | Models |
-|----------|--------|
-| OpenAI | gpt-4o, gpt-4o-mini, o1, o1-mini |
-| Anthropic | claude-sonnet-4, claude-haiku-4 |
-| Google | gemini-2.5-pro, gemini-2.5-flash |
-| DeepSeek | deepseek-chat, deepseek-reasoner |
-| xAI | grok-3, grok-3-mini |
+| Provider | Featured Models |
+|----------|-----------------|
+| **OpenAI** | gpt-5.2, gpt-5.2-codex, gpt-4o, gpt-4o-mini, o1, o1-mini, o3, o4-mini |
+| **Anthropic** | claude-opus-4.6, claude-opus-4.5, claude-opus-4, claude-sonnet-4.6, claude-sonnet-4, claude-haiku-4.5 |
+| **Google** | gemini-3-pro-preview, gemini-2.5-pro, gemini-2.5-flash |
+| **DeepSeek** | deepseek-chat, deepseek-reasoner |
+| **xAI** | grok-4-1-fast-reasoning, grok-4-fast-reasoning, grok-3, grok-3-mini, grok-code-fast-1 |
+| **Meta** | llama-3.3-70b, llama-3.1-405b |
+| **Moonshot** | kimi-k2.5 |
+
+**Latest Additions:**
+- **Claude Opus 4.6** - Latest flagship with 64k output
+- **GPT-5.2 Codex** - Optimized for code generation
+- **Kimi K2.5** - 256k context, great for coding
 
 Use `client.ListModels()` for the full list with current pricing.
 
