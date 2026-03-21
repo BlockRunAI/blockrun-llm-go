@@ -1,6 +1,9 @@
 # BlockRun LLM Go SDK
 
-Go SDK for [BlockRun](https://blockrun.ai) - access multiple LLM providers (OpenAI, Anthropic, Google, etc.) with automatic x402 micropayments on Base chain.
+> **blockrun-llm-go** is a Go SDK for accessing 40+ large language models (GPT-5, Claude, Gemini, Grok, DeepSeek, Kimi, and more) with automatic pay-per-request USDC micropayments via the x402 protocol on Base chain. No API keys required — your wallet signature is your authentication. Built for Go developers building autonomous AI agents.
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/blockrunai/blockrun-llm-go.svg)](https://pkg.go.dev/github.com/blockrunai/blockrun-llm-go)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## Installation
 
@@ -36,23 +39,19 @@ func main() {
 }
 ```
 
-## Security
+That's it. The SDK handles x402 payment automatically.
 
-**Your private key NEVER leaves your machine.**
+## How It Works
 
-Here's what happens when you make a request:
+1. You send a request to BlockRun's API
+2. The API returns a 402 Payment Required with the price
+3. The SDK automatically signs a USDC payment on Base (EIP-712 typed data)
+4. The request is retried with the payment proof
+5. You receive the AI response
 
-1. Your key stays local - only used to sign an EIP-712 typed data message
-2. Only the SIGNATURE is sent in the `PAYMENT-SIGNATURE` header
-3. BlockRun verifies the signature on-chain via Coinbase CDP facilitator
-4. Your actual private key is NEVER transmitted to any server
+**Your private key never leaves your machine** — it's only used for local EIP-712 signing. This is the same security model as signing a MetaMask transaction.
 
-This is the same security model as:
-- Signing a MetaMask transaction
-- Any on-chain swap or trade
-- Standard EIP-3009 TransferWithAuthorization
-
-## Usage
+## Usage Examples
 
 ### Initialize Client
 
@@ -72,10 +71,10 @@ client, err := blockrun.NewLLMClient("0x...",
 ### Simple Chat
 
 ```go
-// Basic chat
-response, err := client.Chat("openai/gpt-4o", "What is the capital of France?")
+// Basic chat with any model
+response, err := client.Chat("openai/gpt-5.2", "Explain quantum computing")
 
-// Use Codex for coding tasks (cost-effective)
+// Use Codex for coding tasks
 response, err := client.Chat("openai/gpt-5.2-codex", "Write a binary search in Go")
 
 // Chat with system prompt
@@ -119,46 +118,44 @@ for _, model := range models {
 ```go
 address := client.GetWalletAddress()
 fmt.Printf("Wallet: %s\n", address)
+fmt.Printf("View transactions: https://basescan.org/address/%s\n", address)
 ```
 
 ## Available Models
 
-BlockRun provides access to 38+ models from multiple providers:
+BlockRun provides access to 40+ models from 10 providers through a single OpenAI-compatible endpoint.
 
-| Provider | Featured Models |
-|----------|-----------------|
-| **OpenAI** | gpt-5.2, gpt-5.2-codex, gpt-4o, gpt-4o-mini, o1, o1-mini, o3, o4-mini |
-| **Anthropic** | claude-opus-4.6, claude-opus-4.5, claude-opus-4, claude-sonnet-4.6, claude-sonnet-4, claude-haiku-4.5 |
-| **Google** | gemini-3-pro-preview, gemini-2.5-pro, gemini-2.5-flash |
-| **DeepSeek** | deepseek-chat, deepseek-reasoner |
-| **xAI** | grok-4-1-fast-reasoning, grok-4-fast-reasoning, grok-3, grok-3-mini, grok-code-fast-1 |
-| **Meta** | llama-3.3-70b, llama-3.1-405b |
-| **Moonshot** | kimi-k2.5 |
+### Featured Models
 
-**Latest Additions:**
-- **Claude Opus 4.6** - Latest flagship with 64k output
-- **GPT-5.2 Codex** - Optimized for code generation
-- **Kimi K2.5** - 256k context, great for coding
+| Provider | Models | Input $/M | Output $/M |
+|----------|--------|-----------|------------|
+| **OpenAI** | GPT-5.2, GPT-5.2 Codex, GPT-5 Mini, GPT-4o, GPT-4o-mini | $0.05–$21.00 | $0.40–$168.00 |
+| **Anthropic** | Claude Opus 4.6, Claude Sonnet 4.6, Claude Haiku 4.5 | $1.00–$5.00 | $5.00–$25.00 |
+| **Google** | Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash | $0.10–$2.00 | $0.40–$12.00 |
+| **xAI** | Grok 4.1 Fast, Grok 3, Grok Code Fast 1 | $0.20–$3.00 | $0.50–$15.00 |
+| **DeepSeek** | DeepSeek Chat, DeepSeek Reasoner | $0.28 | $0.42 |
+| **Moonshot** | Kimi K2.5 (262K context) | $0.60 | $3.00 |
+| **NVIDIA** | GPT-OSS 120B | **FREE** | **FREE** |
 
 Use `client.ListModels()` for the full list with current pricing.
 
-## How x402 Works
-
-1. You make an API request
-2. Server returns `402 Payment Required` with payment details
-3. SDK signs an EIP-712 message locally (key never sent)
-4. SDK retries with `PAYMENT-SIGNATURE` header
-5. Server verifies signature, settles payment on-chain
-6. Server returns the AI response
-
-All this happens automatically - you just call `Chat()` or `ChatCompletion()`.
-
 ## Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `BASE_CHAIN_WALLET_KEY` | Your Base chain wallet private key | Required |
-| `BLOCKRUN_API_URL` | Custom API endpoint | `https://blockrun.ai/api` |
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `BASE_CHAIN_WALLET_KEY` | Your Base chain wallet private key | Yes (or pass to constructor) |
+| `BLOCKRUN_API_URL` | Custom API endpoint | No (default: https://blockrun.ai/api) |
+
+## Setting Up Your Wallet
+
+1. Create a wallet on Base network (Coinbase Wallet, MetaMask, etc.)
+2. Get some ETH on Base for gas (small amount, ~$1)
+3. Get USDC on Base for API payments
+4. Export your private key and set it as `BASE_CHAIN_WALLET_KEY`
+
+```bash
+export BASE_CHAIN_WALLET_KEY=0x...your_private_key_here
+```
 
 ## Error Handling
 
@@ -178,10 +175,48 @@ if err != nil {
 }
 ```
 
+## Security
+
+### Private Key Safety
+
+- **Private key stays local**: Your key is only used for EIP-712 signing on your machine
+- **No custody**: BlockRun never holds your funds — settlement is non-custodial
+- **Verify transactions**: All payments are on-chain and verifiable on [Basescan](https://basescan.org)
+
+### Best Practices
+
+- Use environment variables, never hard-code keys
+- Use dedicated wallets for API payments (separate from main holdings)
+- Set spending limits by only funding payment wallets with small amounts
+- Never commit private keys to version control
+
 ## Requirements
 
 - Go 1.21+
 - A wallet with USDC on Base chain
+
+## Frequently Asked Questions
+
+### What is blockrun-llm-go?
+blockrun-llm-go is a Go SDK that provides pay-per-request access to 40+ large language models from OpenAI, Anthropic, Google, xAI, DeepSeek, Moonshot, and more. It uses the x402 protocol for automatic USDC micropayments — no API keys, no subscriptions, no vendor lock-in.
+
+### How does payment work?
+When you call `Chat()` or `ChatCompletion()`, the SDK automatically handles x402 payment. It signs an EIP-712 typed data message locally using your wallet private key (which never leaves your machine), and includes the signature in the request header. Settlement is non-custodial and instant on Base chain.
+
+### How much does it cost?
+Pay only for what you use. Prices start at $0/request (NVIDIA GPT-OSS 120B is free). There are no minimums, subscriptions, or monthly fees. $5 in USDC gets you thousands of requests.
+
+### Does it support Solana?
+The Go SDK currently supports Base chain only. For Solana support, use the [Python SDK](https://github.com/blockrunai/blockrun-llm) or [TypeScript SDK](https://github.com/blockrunai/blockrun-llm-ts).
+
+## Links
+
+- [Website](https://blockrun.ai)
+- [Documentation](https://github.com/BlockRunAI/awesome-blockrun/tree/main/docs)
+- [Python SDK](https://github.com/blockrunai/blockrun-llm)
+- [TypeScript SDK](https://github.com/blockrunai/blockrun-llm-ts)
+- [GitHub](https://github.com/blockrunai/blockrun-llm-go)
+- [Telegram](https://t.me/+mroQv4-4hGgzOGUx)
 
 ## License
 
