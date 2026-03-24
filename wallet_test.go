@@ -1,6 +1,7 @@
 package blockrun
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,5 +216,149 @@ func TestFormatFundingMessageCompact(t *testing.T) {
 	fullMsg := FormatNeedsFundingMessage(testWalletAddress)
 	if len(msg) >= len(fullMsg) {
 		t.Error("Expected compact message to be shorter than full message")
+	}
+}
+
+func TestScanWalletsFindsSessionFile(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create .blockrun/.session with a valid key
+	blockrunDir := filepath.Join(tempDir, ".blockrun")
+	if err := os.MkdirAll(blockrunDir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blockrunDir, ".session"), []byte(testPrivateKey), 0600); err != nil {
+		t.Fatalf("Failed to write session file: %v", err)
+	}
+
+	wallets := scanWalletsFromHome(tempDir)
+
+	if len(wallets) != 1 {
+		t.Fatalf("Expected 1 wallet, got %d", len(wallets))
+	}
+
+	if wallets[0].Address != testWalletAddress {
+		t.Errorf("Expected address %s, got %s", testWalletAddress, wallets[0].Address)
+	}
+
+	if wallets[0].PrivateKey != testPrivateKey {
+		t.Errorf("Expected private key to match")
+	}
+}
+
+func TestScanWalletsFindsJSONWallet(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create .agentcash/wallet.json with JSON format
+	agentcashDir := filepath.Join(tempDir, ".agentcash")
+	if err := os.MkdirAll(agentcashDir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+
+	walletJSON, _ := json.Marshal(map[string]string{"privateKey": testPrivateKey})
+	if err := os.WriteFile(filepath.Join(agentcashDir, "wallet.json"), walletJSON, 0600); err != nil {
+		t.Fatalf("Failed to write wallet.json: %v", err)
+	}
+
+	wallets := scanWalletsFromHome(tempDir)
+
+	if len(wallets) != 1 {
+		t.Fatalf("Expected 1 wallet, got %d", len(wallets))
+	}
+
+	if wallets[0].Address != testWalletAddress {
+		t.Errorf("Expected address %s, got %s", testWalletAddress, wallets[0].Address)
+	}
+}
+
+func TestScanWalletsEmptyDir(t *testing.T) {
+	tempDir := t.TempDir()
+
+	wallets := scanWalletsFromHome(tempDir)
+
+	if len(wallets) != 0 {
+		t.Errorf("Expected 0 wallets, got %d", len(wallets))
+	}
+}
+
+func TestScanWalletsSkipsInvalidKeys(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create a file with an invalid key
+	blockrunDir := filepath.Join(tempDir, ".blockrun")
+	if err := os.MkdirAll(blockrunDir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blockrunDir, ".session"), []byte("not-a-valid-key"), 0600); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+
+	wallets := scanWalletsFromHome(tempDir)
+
+	if len(wallets) != 0 {
+		t.Errorf("Expected 0 wallets for invalid key, got %d", len(wallets))
+	}
+}
+
+func TestScanWalletsMultipleProviders(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create wallets in two different provider dirs
+	for _, dir := range []string{".blockrun", ".replit"} {
+		providerDir := filepath.Join(tempDir, dir)
+		if err := os.MkdirAll(providerDir, 0755); err != nil {
+			t.Fatalf("Failed to create dir: %v", err)
+		}
+
+		var filename string
+		if dir == ".blockrun" {
+			filename = ".session"
+			if err := os.WriteFile(filepath.Join(providerDir, filename), []byte(testPrivateKey), 0600); err != nil {
+				t.Fatalf("Failed to write file: %v", err)
+			}
+		} else {
+			filename = "wallet.json"
+			walletJSON, _ := json.Marshal(map[string]string{"privateKey": testPrivateKey})
+			if err := os.WriteFile(filepath.Join(providerDir, filename), walletJSON, 0600); err != nil {
+				t.Fatalf("Failed to write file: %v", err)
+			}
+		}
+	}
+
+	wallets := scanWalletsFromHome(tempDir)
+
+	// Both should resolve to the same address (same key used)
+	if len(wallets) != 2 {
+		t.Fatalf("Expected 2 wallets, got %d", len(wallets))
+	}
+
+	for _, w := range wallets {
+		if w.Address != testWalletAddress {
+			t.Errorf("Expected address %s, got %s", testWalletAddress, w.Address)
+		}
+	}
+}
+
+func TestScanWalletsUsesHomeEnv(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOME", tempDir)
+
+	// Create .blockrun/.session
+	blockrunDir := filepath.Join(tempDir, ".blockrun")
+	if err := os.MkdirAll(blockrunDir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blockrunDir, ".session"), []byte(testPrivateKey), 0600); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+
+	wallets := ScanWallets()
+
+	if len(wallets) != 1 {
+		t.Fatalf("Expected 1 wallet, got %d", len(wallets))
+	}
+
+	if wallets[0].Address != testWalletAddress {
+		t.Errorf("Expected address %s, got %s", testWalletAddress, wallets[0].Address)
 	}
 }

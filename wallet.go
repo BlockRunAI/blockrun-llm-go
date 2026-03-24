@@ -2,6 +2,7 @@ package blockrun
 
 import (
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -257,4 +258,55 @@ func FormatFundingMessageCompact(address string) string {
 	links := GetPaymentLinks(address)
 	return fmt.Sprintf("I need a little top-up to keep helping you! Send USDC on Base to: %s\nCheck my balance: %s",
 		address, links.Basescan)
+}
+
+// ScanWallets looks for wallet files from various providers.
+func ScanWallets() []WalletInfo {
+	home := os.Getenv("HOME")
+	return scanWalletsFromHome(home)
+}
+
+// scanWalletsFromHome is the internal implementation that accepts a home directory,
+// making it testable without modifying the HOME environment variable.
+func scanWalletsFromHome(home string) []WalletInfo {
+	providers := []struct {
+		dir  string
+		file string
+	}{
+		{".blockrun", ".session"},
+		{".blockrun", "wallet.key"},
+		{".agentcash", "wallet.json"},
+		{".replit", "wallet.json"},
+	}
+
+	var wallets []WalletInfo
+	for _, p := range providers {
+		path := filepath.Join(home, p.dir, p.file)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		key := strings.TrimSpace(string(data))
+		if key == "" {
+			continue
+		}
+
+		// Try JSON format first
+		var jsonWallet struct {
+			PrivateKey string `json:"privateKey"`
+		}
+		if err := json.Unmarshal(data, &jsonWallet); err == nil && jsonWallet.PrivateKey != "" {
+			key = jsonWallet.PrivateKey
+		}
+
+		addr, err := GetAddressFromKey(key)
+		if err != nil {
+			continue
+		}
+		wallets = append(wallets, WalletInfo{
+			PrivateKey: key,
+			Address:    addr,
+		})
+	}
+	return wallets
 }
