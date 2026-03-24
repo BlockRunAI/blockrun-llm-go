@@ -147,6 +147,13 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, model string, messages [
 			// Simple shortcut: Search=true enables live search with defaults
 			body["search_parameters"] = map[string]string{"mode": "on"}
 		}
+		// Handle tool/function calling
+		if opts.Tools != nil {
+			body["tools"] = opts.Tools
+		}
+		if opts.ToolChoice != nil {
+			body["tool_choice"] = opts.ToolChoice
+		}
 	}
 	body["max_tokens"] = maxTokens
 
