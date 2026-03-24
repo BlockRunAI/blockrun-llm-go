@@ -1,6 +1,7 @@
 package blockrun
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -54,7 +55,7 @@ func TestImageClientListModels(t *testing.T) {
 		t.Fatalf("Failed to create image client: %v", err)
 	}
 
-	models, err := client.ListImageModels()
+	models, err := client.ListImageModels(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to list image models: %v", err)
 	}
