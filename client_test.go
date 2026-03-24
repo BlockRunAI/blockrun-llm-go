@@ -336,3 +336,142 @@ func TestListAllModels(t *testing.T) {
 		t.Error("Expected to find image model")
 	}
 }
+
+func TestChatCompletionWithTools(t *testing.T) {
+	// Create a mock server that verifies tools are sent and returns tool_calls
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("Expected path /v1/chat/completions, got %s", r.URL.Path)
+		}
+
+		// Decode request body and verify tools/tool_choice are present
+		var reqBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("Failed to decode request body: %v", err)
+		}
+
+		// Verify tools are in the request
+		tools, ok := reqBody["tools"]
+		if !ok {
+			t.Fatal("Expected 'tools' in request body")
+		}
+		toolsList, ok := tools.([]any)
+		if !ok || len(toolsList) != 1 {
+			t.Fatalf("Expected 1 tool, got %v", tools)
+		}
+
+		// Verify tool_choice is in the request
+		toolChoice, ok := reqBody["tool_choice"]
+		if !ok {
+			t.Fatal("Expected 'tool_choice' in request body")
+		}
+		if toolChoice != "auto" {
+			t.Errorf("Expected tool_choice 'auto', got %v", toolChoice)
+		}
+
+		// Return a response with tool_calls
+		resp := ChatResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: 1700000000,
+			Model:   "openai/gpt-4o",
+			Choices: []Choice{
+				{
+					Index: 0,
+					Message: ChatMessage{
+						Role: "assistant",
+						ToolCalls: []ToolCall{
+							{
+								ID:   "call_abc123",
+								Type: "function",
+								Function: ToolCallFunction{
+									Name:      "get_weather",
+									Arguments: `{"location":"San Francisco","unit":"celsius"}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+			Usage: Usage{
+				PromptTokens:     50,
+				CompletionTokens: 20,
+				TotalTokens:      70,
+			},
+		}
+
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewLLMClient(testPrivateKey, WithAPIURL(server.URL))
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	messages := []ChatMessage{
+		{Role: "user", Content: "What's the weather in San Francisco?"},
+	}
+
+	opts := &ChatCompletionOptions{
+		Tools: []Tool{
+			{
+				Type: "function",
+				Function: ToolFunction{
+					Name:        "get_weather",
+					Description: "Get current weather for a location",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"location": map[string]any{
+								"type":        "string",
+								"description": "City name",
+							},
+							"unit": map[string]any{
+								"type": "string",
+								"enum": []string{"celsius", "fahrenheit"},
+							},
+						},
+						"required": []string{"location"},
+					},
+				},
+			},
+		},
+		ToolChoice: "auto",
+	}
+
+	resp, err := client.ChatCompletion(context.Background(), "openai/gpt-4o", messages, opts)
+	if err != nil {
+		t.Fatalf("Failed to call ChatCompletion with tools: %v", err)
+	}
+
+	if len(resp.Choices) != 1 {
+		t.Fatalf("Expected 1 choice, got %d", len(resp.Choices))
+	}
+
+	choice := resp.Choices[0]
+
+	// Verify tool_calls are deserialized
+	if len(choice.Message.ToolCalls) != 1 {
+		t.Fatalf("Expected 1 tool call, got %d", len(choice.Message.ToolCalls))
+	}
+
+	tc := choice.Message.ToolCalls[0]
+	if tc.ID != "call_abc123" {
+		t.Errorf("Expected tool call ID 'call_abc123', got '%s'", tc.ID)
+	}
+	if tc.Type != "function" {
+		t.Errorf("Expected tool call type 'function', got '%s'", tc.Type)
+	}
+	if tc.Function.Name != "get_weather" {
+		t.Errorf("Expected function name 'get_weather', got '%s'", tc.Function.Name)
+	}
+	if tc.Function.Arguments != `{"location":"San Francisco","unit":"celsius"}` {
+		t.Errorf("Unexpected arguments: %s", tc.Function.Arguments)
+	}
+
+	if choice.FinishReason != "tool_calls" {
+		t.Errorf("Expected finish_reason 'tool_calls', got '%s'", choice.FinishReason)
+	}
+}

@@ -12,8 +12,10 @@ import "fmt"
 
 // ChatMessage represents a message in the conversation.
 type ChatMessage struct {
-	Role    string `json:"role"`    // "system", "user", or "assistant"
-	Content string `json:"content"` // Message content
+	Role       string     `json:"role"`                  // "system", "user", "assistant", or "tool"
+	Content    string     `json:"content"`               // Message content
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`  // Tool calls from assistant
+	ToolCallID string     `json:"tool_call_id,omitempty"` // ID of the tool call this message responds to
 }
 
 // ChatCompletionOptions contains optional parameters for chat completion.
@@ -23,6 +25,8 @@ type ChatCompletionOptions struct {
 	TopP             float64           `json:"top_p,omitempty"`
 	Search           bool              `json:"-"` // Enable xAI Live Search (shortcut)
 	SearchParameters *SearchParameters `json:"search_parameters,omitempty"`
+	Tools            []Tool            `json:"tools,omitempty"`
+	ToolChoice       any               `json:"tool_choice,omitempty"` // string ("none","auto","required") or object
 }
 
 // SearchParameters contains xAI Live Search configuration.
@@ -49,6 +53,32 @@ type SearchSource struct {
 	PostViewCount     int      `json:"post_view_count,omitempty"`
 	// RSS-specific fields
 	Links []string `json:"links,omitempty"`
+}
+
+// Tool represents a function tool for chat completion.
+type Tool struct {
+	Type     string       `json:"type"` // "function"
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction describes a callable function.
+type ToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"` // JSON Schema
+}
+
+// ToolCall represents a tool call in an assistant message.
+type ToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"` // "function"
+	Function ToolCallFunction `json:"function"`
+}
+
+// ToolCallFunction contains the function name and arguments.
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON string
 }
 
 // ChatResponse represents the API response for chat completions.
