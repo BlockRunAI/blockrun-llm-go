@@ -1,8 +1,10 @@
+//go:build integration
 // +build integration
 
 package blockrun
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -24,7 +26,7 @@ func TestRealAPI(t *testing.T) {
 
 	// Test 1: List models (no payment required)
 	t.Run("ListModels", func(t *testing.T) {
-		models, err := client.ListModels()
+		models, err := client.ListModels(context.Background())
 		if err != nil {
 			t.Fatalf("ListModels failed: %v", err)
 		}
@@ -36,7 +38,7 @@ func TestRealAPI(t *testing.T) {
 
 	// Test 2: Simple chat (requires payment)
 	t.Run("Chat", func(t *testing.T) {
-		response, err := client.Chat("openai/gpt-4o-mini", "What is 2+2? Reply with just the number.")
+		response, err := client.Chat(context.Background(), "openai/gpt-4o-mini", "What is 2+2? Reply with just the number.")
 		if err != nil {
 			t.Fatalf("Chat failed: %v", err)
 		}

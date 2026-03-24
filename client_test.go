@@ -1,6 +1,7 @@
 package blockrun
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -47,6 +48,7 @@ func TestNewLLMClientInvalidKey(t *testing.T) {
 
 func TestNewLLMClientEmptyKey(t *testing.T) {
 	// Clear env var for test
+	t.Setenv("BLOCKRUN_WALLET_KEY", "")
 	t.Setenv("BASE_CHAIN_WALLET_KEY", "")
 
 	_, err := NewLLMClient("")
@@ -169,7 +171,7 @@ func TestListModels(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	models, err := client.ListModels()
+	models, err := client.ListModels(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to list models: %v", err)
 	}
@@ -253,7 +255,7 @@ func TestListImageModels(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	models, err := client.ListImageModels()
+	models, err := client.ListImageModels(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to list image models: %v", err)
 	}
@@ -300,7 +302,7 @@ func TestListAllModels(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	models, err := client.ListAllModels()
+	models, err := client.ListAllModels(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to list all models: %v", err)
 	}

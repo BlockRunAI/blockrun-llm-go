@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -13,6 +14,8 @@ import (
 )
 
 func main() {
+	ctx := context.Background()
+
 	// Create client (uses BASE_CHAIN_WALLET_KEY env var)
 	client, err := blockrun.NewLLMClient("")
 	if err != nil {
@@ -23,7 +26,7 @@ func main() {
 
 	// Example 1: Simple 1-line chat
 	fmt.Println("=== Example 1: Simple Chat ===")
-	response, err := client.Chat("openai/gpt-4o-mini", "What is 2+2? Reply with just the number.")
+	response, err := client.Chat(ctx, "openai/gpt-4o-mini", "What is 2+2? Reply with just the number.")
 	if err != nil {
 		log.Fatalf("Chat failed: %v", err)
 	}
@@ -32,6 +35,7 @@ func main() {
 	// Example 2: Chat with system prompt
 	fmt.Println("=== Example 2: Chat with System Prompt ===")
 	response, err = client.ChatWithSystem(
+		ctx,
 		"openai/gpt-4o-mini",
 		"Tell me a joke",
 		"You are a comedian who only tells programming jokes.",
@@ -48,7 +52,7 @@ func main() {
 		{Role: "user", Content: "What's the capital of France?"},
 	}
 
-	result, err := client.ChatCompletion("openai/gpt-4o-mini", messages, &blockrun.ChatCompletionOptions{
+	result, err := client.ChatCompletion(ctx, "openai/gpt-4o-mini", messages, &blockrun.ChatCompletionOptions{
 		MaxTokens:   100,
 		Temperature: 0.7,
 	})
@@ -64,7 +68,7 @@ func main() {
 
 	// Example 4: List available models
 	fmt.Println("=== Example 4: List Models ===")
-	models, err := client.ListModels()
+	models, err := client.ListModels(ctx)
 	if err != nil {
 		log.Fatalf("ListModels failed: %v", err)
 	}
