@@ -1,6 +1,6 @@
 # BlockRun LLM Go SDK
 
-> **blockrun-llm-go** is a Go SDK for accessing 40+ large language models (GPT-5, Claude, Gemini, Grok, DeepSeek, Kimi, and more) with automatic pay-per-request USDC micropayments via the x402 protocol on Base chain. No API keys required — your wallet signature is your authentication. Built for Go developers building autonomous AI agents.
+> **blockrun-llm-go** is a Go SDK for accessing 40+ large language models and AI services with automatic pay-per-request USDC micropayments via the x402 protocol on Base chain. No API keys required — your wallet signature is your authentication.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/blockrunai/blockrun-llm-go.svg)](https://pkg.go.dev/github.com/blockrunai/blockrun-llm-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -17,21 +17,22 @@ go get github.com/BlockRunAI/blockrun-llm-go
 package main
 
 import (
+    "context"
     "fmt"
     "log"
 
-    blockrun "github.com/blockrun/blockrun-llm-go"
+    blockrun "github.com/BlockRunAI/blockrun-llm-go"
 )
 
 func main() {
-    // Create client (uses BASE_CHAIN_WALLET_KEY env var)
-    client, err := blockrun.NewLLMClient("")
+    ctx := context.Background()
+
+    client, err := blockrun.NewLLMClient("")  // uses BASE_CHAIN_WALLET_KEY env var
     if err != nil {
         log.Fatal(err)
     }
 
-    // Simple 1-line chat
-    response, err := client.Chat("openai/gpt-4o", "What is 2+2?")
+    response, err := client.Chat(ctx, "openai/gpt-4o", "What is 2+2?")
     if err != nil {
         log.Fatal(err)
     }
@@ -39,93 +40,279 @@ func main() {
 }
 ```
 
-That's it. The SDK handles x402 payment automatically.
-
 ## How It Works
 
 1. You send a request to BlockRun's API
 2. The API returns a 402 Payment Required with the price
-3. The SDK automatically signs a USDC payment on Base (EIP-712 typed data)
+3. The SDK signs a USDC payment on Base locally (EIP-712 typed data)
 4. The request is retried with the payment proof
-5. You receive the AI response
+5. You receive the response
 
-**Your private key never leaves your machine** — it's only used for local EIP-712 signing. This is the same security model as signing a MetaMask transaction.
+**Your private key never leaves your machine** — only signatures are transmitted.
 
-## Usage Examples
+## Features
 
-### Initialize Client
+| Feature | Description |
+|---------|-------------|
+| **Chat & Completion** | OpenAI-compatible chat with 40+ models |
+| **Smart Routing** | Auto-selects the best model for your prompt |
+| **Streaming** | SSE streaming for real-time responses |
+| **Tool Calling** | OpenAI-compatible function/tool calling |
+| **X/Twitter Data** | 15 endpoints for users, tweets, search, analytics |
+| **Web Search** | Search web, X/Twitter, and news |
+| **Prediction Markets** | Polymarket, Kalshi data access |
+| **Image Generation** | DALL-E 3, Nano Banana, Flux models |
+| **Response Caching** | Local cache with per-endpoint TTL |
+| **Cost Tracking** | Session spending + persistent JSONL log |
+| **Balance Checking** | Query USDC balance via Base chain RPC |
+| **Agent Wallet Setup** | Auto-create wallets for autonomous agents |
 
-```go
-// From environment variable (BASE_CHAIN_WALLET_KEY)
-client, err := blockrun.NewLLMClient("")
-
-// Or pass private key directly
-client, err := blockrun.NewLLMClient("0x...")
-
-// With custom timeout (default: 60s)
-client, err := blockrun.NewLLMClient("0x...",
-    blockrun.WithTimeout(120 * time.Second),
-)
-```
-
-### Simple Chat
-
-```go
-// Basic chat with any model
-response, err := client.Chat("openai/gpt-5.2", "Explain quantum computing")
-
-// Use Codex for coding tasks
-response, err := client.Chat("openai/gpt-5.2-codex", "Write a binary search in Go")
-
-// Chat with system prompt
-response, err := client.ChatWithSystem(
-    "anthropic/claude-opus-4.6",
-    "Explain quantum computing",
-    "You are a physics professor.",
-)
-```
-
-### Full Chat Completion (OpenAI-compatible)
+## Chat
 
 ```go
-messages := []blockrun.ChatMessage{
-    {Role: "system", Content: "You are a helpful assistant."},
-    {Role: "user", Content: "Hello!"},
-}
+ctx := context.Background()
 
-result, err := client.ChatCompletion("openai/gpt-4o", messages, &blockrun.ChatCompletionOptions{
+// Simple chat
+response, err := client.Chat(ctx, "openai/gpt-4o", "Explain quantum computing")
+
+// With system prompt
+response, err := client.ChatWithSystem(ctx, "anthropic/claude-sonnet-4.6", "Tell me a joke", "You are a comedian.")
+
+// Full completion with options
+result, err := client.ChatCompletion(ctx, "openai/gpt-4o", messages, &blockrun.ChatCompletionOptions{
     MaxTokens:   1024,
     Temperature: 0.7,
-    TopP:        0.9,
 })
-
 fmt.Println(result.Choices[0].Message.Content)
-fmt.Printf("Tokens: %d\n", result.Usage.TotalTokens)
 ```
 
-### List Available Models
+## Smart Routing (ClawRouter)
+
+Auto-selects the best model based on prompt complexity analysis — all routing is local, <1ms.
 
 ```go
-models, err := client.ListModels()
-for _, model := range models {
-    fmt.Printf("%s: $%.4f/$%.4f per 1M tokens\n",
-        model.ID, model.InputPrice, model.OutputPrice)
+// Auto profile (default) — balances cost and quality
+resp, err := client.SmartChat(ctx, "Write a binary search in Go", nil)
+fmt.Printf("Used: %s (tier: %s)\n", resp.Model, resp.Routing.Tier)
+
+// Economy profile — cheapest models
+resp, err := client.SmartChat(ctx, "What is 2+2?", &blockrun.SmartChatOptions{
+    RoutingProfile: blockrun.RoutingEco,
+})
+
+// Premium profile — top-tier models
+resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
+    RoutingProfile: blockrun.RoutingPremium,
+})
+```
+
+| Profile | Simple | Medium | Complex | Reasoning |
+|---------|--------|--------|---------|-----------|
+| **free** | nvidia/gpt-oss-120b | nvidia/gpt-oss-120b | nvidia/gpt-oss-120b | nvidia/gpt-oss-120b |
+| **eco** | nvidia/kimi-k2.5 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
+| **auto** | nvidia/kimi-k2.5 | google/gemini-2.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
+| **premium** | google/gemini-2.5-flash | openai/gpt-5.4 | anthropic/claude-opus-4.5 | openai/o3 |
+
+## Streaming
+
+```go
+stream, err := client.ChatCompletionStream(ctx, "openai/gpt-4o", []blockrun.ChatMessage{
+    {Role: "user", Content: "Write a poem about Go"},
+}, nil)
+if err != nil {
+    log.Fatal(err)
+}
+defer stream.Close()
+
+for {
+    chunk, err := stream.Next()
+    if err != nil {
+        log.Fatal(err)
+    }
+    if chunk == nil {
+        break // stream complete
+    }
+    fmt.Print(chunk.Choices[0].Delta.Content)
 }
 ```
 
-### Get Wallet Address
+## Tool / Function Calling
 
 ```go
-address := client.GetWalletAddress()
-fmt.Printf("Wallet: %s\n", address)
-fmt.Printf("View transactions: https://basescan.org/address/%s\n", address)
+result, err := client.ChatCompletion(ctx, "openai/gpt-4o", messages, &blockrun.ChatCompletionOptions{
+    Tools: []blockrun.Tool{
+        {
+            Type: "function",
+            Function: blockrun.ToolFunction{
+                Name:        "get_weather",
+                Description: "Get current weather for a location",
+                Parameters: map[string]any{
+                    "type": "object",
+                    "properties": map[string]any{
+                        "location": map[string]any{"type": "string"},
+                    },
+                    "required": []string{"location"},
+                },
+            },
+        },
+    },
+    ToolChoice: "auto",
+})
+
+// Check if model wants to call a tool
+if len(result.Choices[0].Message.ToolCalls) > 0 {
+    call := result.Choices[0].Message.ToolCalls[0]
+    fmt.Printf("Tool: %s(%s)\n", call.Function.Name, call.Function.Arguments)
+}
+```
+
+## X/Twitter Data
+
+15 endpoints for real-time X/Twitter intelligence. All powered by AttentionVC.
+
+```go
+// Look up users
+users, err := client.XUserLookup(ctx, []string{"elonmusk", "vaborsh"})
+
+// Get followers
+followers, err := client.XFollowers(ctx, "elonmusk", "")
+
+// Search tweets
+results, err := client.XSearch(ctx, "bitcoin", "Latest", "")
+
+// Trending topics
+trending, err := client.XTrending(ctx)
+
+// Author analytics
+analytics, err := client.XAuthorAnalytics(ctx, "vaborsh")
+
+// Compare authors
+comparison, err := client.XCompareAuthors(ctx, "elonmusk", "vaborsh")
+```
+
+**All X/Twitter Methods:**
+
+| Method | Endpoint | Price |
+|--------|----------|-------|
+| `XUserLookup` | User profiles by username | $0.002/user |
+| `XFollowers` | Follower list | $0.05/page |
+| `XFollowings` | Following list | $0.05/page |
+| `XUserInfo` | Detailed profile | $0.002 |
+| `XVerifiedFollowers` | Verified followers | $0.048/page |
+| `XUserTweets` | User's tweets | $0.032/page |
+| `XUserMentions` | Mentions of user | $0.032/page |
+| `XTweetLookup` | Tweets by ID | $0.16/batch |
+| `XTweetReplies` | Replies to tweet | $0.032/page |
+| `XTweetThread` | Full thread | $0.032/page |
+| `XSearch` | Search tweets | $0.032/page |
+| `XTrending` | Trending topics | $0.002 |
+| `XArticlesRising` | Viral articles | $0.05 |
+| `XAuthorAnalytics` | Author metrics | $0.02 |
+| `XCompareAuthors` | Compare authors | $0.05 |
+
+## Web Search
+
+```go
+// Simple search
+result, err := client.Search(ctx, "latest AI news", nil)
+fmt.Println(result.Summary)
+fmt.Println(result.Citations)
+
+// With options
+result, err := client.Search(ctx, "Go 1.23 features", &blockrun.SearchOptions{
+    Sources:    []string{"web", "news"},
+    MaxResults: 5,
+    FromDate:   "2025-01-01",
+})
+```
+
+## Prediction Markets
+
+Access Polymarket, Kalshi, and more via Predexon.
+
+```go
+// GET endpoints ($0.001/request)
+events, err := client.PM(ctx, "polymarket/events", nil)
+markets, err := client.PM(ctx, "polymarket/search", map[string]string{"q": "bitcoin"})
+
+// POST query endpoints ($0.005/request)
+result, err := client.PMQuery(ctx, "polymarket/query", map[string]any{
+    "filter": "active",
+    "limit":  10,
+})
+```
+
+## Image Generation
+
+```go
+imageClient, err := blockrun.NewImageClient("")
+
+result, err := imageClient.Generate(ctx, "A cat astronaut on Mars", &blockrun.ImageGenerateOptions{
+    Model: "openai/dall-e-3",
+    Size:  "1024x1024",
+})
+fmt.Println(result.Data[0].URL)
+```
+
+## Response Caching
+
+Enable local caching to avoid redundant API calls.
+
+```go
+client, err := blockrun.NewLLMClient("", blockrun.WithCache(true))
+```
+
+Cache TTLs by endpoint:
+- X/Twitter: 1 hour
+- Prediction Markets: 30 minutes
+- Search: 15 minutes
+- Chat/Images: never cached
+
+## Cost Tracking
+
+```go
+// Session spending
+spending := client.GetSpending()
+fmt.Printf("Session: %d calls, $%.6f\n", spending.Calls, spending.TotalUSD)
+
+// Persistent cost log (across sessions)
+summary, err := client.GetCostSummary()
+fmt.Printf("Total: $%.4f across %d calls\n", summary.TotalUSD, summary.Calls)
+for endpoint, cost := range summary.ByEndpoint {
+    fmt.Printf("  %s: $%.4f\n", endpoint, cost)
+}
+```
+
+## Balance Checking
+
+```go
+balance, err := client.GetBalance(ctx)
+fmt.Printf("USDC balance: $%.2f\n", balance)
+
+// Testnet
+balance, err := client.GetBalanceTestnet(ctx)
+```
+
+## Agent Wallet Setup
+
+For autonomous agents that need their own wallet:
+
+```go
+// Auto-creates wallet if none exists, prints funding instructions
+client, err := blockrun.SetupAgentWallet()
+
+// Check status
+address, balance, err := client.Status(ctx)
+fmt.Printf("Address: %s, Balance: $%.2f\n", address, balance)
+
+// Scan wallets from multiple providers
+wallets := blockrun.ScanWallets()
+for _, w := range wallets {
+    fmt.Printf("Found wallet: %s\n", w.Address)
+}
 ```
 
 ## Available Models
-
-BlockRun provides access to 40+ models from 10 providers through a single OpenAI-compatible endpoint.
-
-### Featured Models
 
 | Provider | Models | Input $/M | Output $/M |
 |----------|--------|-----------|------------|
@@ -137,30 +324,20 @@ BlockRun provides access to 40+ models from 10 providers through a single OpenAI
 | **Moonshot** | Kimi K2.5 (262K context) | $0.60 | $3.00 |
 | **NVIDIA** | GPT-OSS 120B | **FREE** | **FREE** |
 
-Use `client.ListModels()` for the full list with current pricing.
+Use `client.ListModels(ctx)` for the full list with current pricing.
 
 ## Environment Variables
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `BASE_CHAIN_WALLET_KEY` | Your Base chain wallet private key | Yes (or pass to constructor) |
+| `BASE_CHAIN_WALLET_KEY` | Base chain wallet private key | Yes (or pass to constructor) |
+| `BLOCKRUN_WALLET_KEY` | Alias for BASE_CHAIN_WALLET_KEY | No |
 | `BLOCKRUN_API_URL` | Custom API endpoint | No (default: https://blockrun.ai/api) |
-
-## Setting Up Your Wallet
-
-1. Create a wallet on Base network (Coinbase Wallet, MetaMask, etc.)
-2. Get some ETH on Base for gas (small amount, ~$1)
-3. Get USDC on Base for API payments
-4. Export your private key and set it as `BASE_CHAIN_WALLET_KEY`
-
-```bash
-export BASE_CHAIN_WALLET_KEY=0x...your_private_key_here
-```
 
 ## Error Handling
 
 ```go
-response, err := client.Chat("openai/gpt-4o", "Hello")
+response, err := client.Chat(ctx, "openai/gpt-4o", "Hello")
 if err != nil {
     switch e := err.(type) {
     case *blockrun.ValidationError:
@@ -169,45 +346,36 @@ if err != nil {
         fmt.Printf("Payment failed: %s\n", e.Message)
     case *blockrun.APIError:
         fmt.Printf("API error %d: %s\n", e.StatusCode, e.Message)
-    default:
-        fmt.Printf("Error: %v\n", err)
     }
 }
 ```
 
 ## Security
 
-### Private Key Safety
-
-- **Private key stays local**: Your key is only used for EIP-712 signing on your machine
-- **No custody**: BlockRun never holds your funds — settlement is non-custodial
-- **Verify transactions**: All payments are on-chain and verifiable on [Basescan](https://basescan.org)
-
-### Best Practices
-
+- **Private key stays local**: Only used for EIP-712 signing — never transmitted
+- **Non-custodial**: BlockRun never holds your funds
+- **On-chain verifiable**: All payments visible on [Basescan](https://basescan.org)
 - Use environment variables, never hard-code keys
-- Use dedicated wallets for API payments (separate from main holdings)
-- Set spending limits by only funding payment wallets with small amounts
-- Never commit private keys to version control
+- Use dedicated wallets with small balances for API payments
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.22+
 - A wallet with USDC on Base chain
 
-## Frequently Asked Questions
+## FAQ
 
-### What is blockrun-llm-go?
-blockrun-llm-go is a Go SDK that provides pay-per-request access to 40+ large language models from OpenAI, Anthropic, Google, xAI, DeepSeek, Moonshot, and more. It uses the x402 protocol for automatic USDC micropayments — no API keys, no subscriptions, no vendor lock-in.
+**What is blockrun-llm-go?**
+A Go SDK for pay-per-request access to 40+ LLMs, X/Twitter data, web search, prediction markets, and image generation. Uses x402 micropayments — no API keys, no subscriptions.
 
-### How does payment work?
-When you call `Chat()` or `ChatCompletion()`, the SDK automatically handles x402 payment. It signs an EIP-712 typed data message locally using your wallet private key (which never leaves your machine), and includes the signature in the request header. Settlement is non-custodial and instant on Base chain.
+**How much does it cost?**
+Pay only for what you use. NVIDIA GPT-OSS 120B is free. $5 USDC gets you thousands of requests.
 
-### How much does it cost?
-Pay only for what you use. Prices start at $0/request (NVIDIA GPT-OSS 120B is free). There are no minimums, subscriptions, or monthly fees. $5 in USDC gets you thousands of requests.
+**Does it support Solana?**
+The Go SDK supports Base chain only. For Solana, use the [Python SDK](https://github.com/blockrunai/blockrun-llm) or [TypeScript SDK](https://github.com/blockrunai/blockrun-llm-ts).
 
-### Does it support Solana?
-The Go SDK currently supports Base chain only. For Solana support, use the [Python SDK](https://github.com/blockrunai/blockrun-llm) or [TypeScript SDK](https://github.com/blockrunai/blockrun-llm-ts).
+**Is streaming supported?**
+Yes. Use `ChatCompletionStream` for SSE streaming.
 
 ## Links
 
