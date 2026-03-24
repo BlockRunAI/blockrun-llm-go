@@ -23,9 +23,11 @@ type baseClient struct {
 	address         string
 	apiURL          string
 	httpClient      *http.Client
+	cache           *Cache
 	mu              sync.Mutex
 	sessionTotalUSD float64
 	sessionCalls    int
+	costLog         *CostLog
 }
 
 // newBaseClient creates a new baseClient with the given private key, API URL, and timeout.
@@ -71,6 +73,7 @@ func newBaseClient(privateKey, apiURL string, timeout time.Duration) (*baseClien
 		address:    address,
 		apiURL:     apiURL,
 		httpClient: &http.Client{Timeout: timeout},
+		costLog:    NewCostLog(),
 	}
 
 	return bc, nil
@@ -102,6 +105,13 @@ func (bc *baseClient) GetSpending() Spending {
 // doRequest makes a POST request to the given endpoint with automatic x402
 // payment handling. It returns the raw response bytes for the caller to unmarshal.
 func (bc *baseClient) doRequest(ctx context.Context, endpoint string, body map[string]any) ([]byte, error) {
+	// Check cache before making request
+	if bc.cache != nil {
+		if cached, ok := bc.cache.Get(endpoint, body); ok {
+			return cached, nil
+		}
+	}
+
 	url := bc.apiURL + endpoint
 
 	// Encode body
@@ -138,11 +148,28 @@ func (bc *baseClient) doRequest(ctx context.Context, endpoint string, body map[s
 	}
 
 	// Read successful response
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache
+	if bc.cache != nil {
+		bc.cache.Set(endpoint, body, data)
+	}
+
+	return data, nil
 }
 
 // doGet makes a GET request to the given endpoint and returns raw response bytes.
 func (bc *baseClient) doGet(ctx context.Context, endpoint string) ([]byte, error) {
+	// Check cache before making request
+	if bc.cache != nil {
+		if cached, ok := bc.cache.Get(endpoint, nil); ok {
+			return cached, nil
+		}
+	}
+
 	url := bc.apiURL + endpoint
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -164,7 +191,17 @@ func (bc *baseClient) doGet(ctx context.Context, endpoint string) ([]byte, error
 		}
 	}
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache
+	if bc.cache != nil {
+		bc.cache.Set(endpoint, nil, data)
+	}
+
+	return data, nil
 }
 
 // handlePaymentAndRetry handles a 402 response by signing a payment and retrying.
@@ -258,13 +295,21 @@ func (bc *baseClient) handlePaymentAndRetry(ctx context.Context, url string, bod
 	// Track spending - convert amount from micro-USDC to USD
 	bc.mu.Lock()
 	bc.sessionCalls++
+	var costUSD float64
 	if amountStr := paymentOption.Amount; amountStr != "" {
 		var amountMicro float64
 		if _, err := fmt.Sscanf(amountStr, "%f", &amountMicro); err == nil {
-			bc.sessionTotalUSD += amountMicro / 1_000_000
+			costUSD = amountMicro / 1_000_000
+			bc.sessionTotalUSD += costUSD
 		}
 	}
 	bc.mu.Unlock()
+
+	// Log cost to persistent JSONL file
+	if bc.costLog != nil && costUSD > 0 {
+		endpoint := strings.TrimPrefix(url, bc.apiURL)
+		bc.costLog.Append(endpoint, costUSD)
+	}
 
 	return respBytes, nil
 }

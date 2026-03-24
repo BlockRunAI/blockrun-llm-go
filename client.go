@@ -58,6 +58,19 @@ func WithHTTPClient(client *http.Client) ClientOption {
 	}
 }
 
+// WithCache enables or disables local response caching with per-endpoint TTL.
+// Cached endpoints: /v1/x/ (1h), /v1/pm/ (30m), /v1/search (15m).
+// Chat and image endpoints are never cached.
+func WithCache(enabled bool) ClientOption {
+	return func(c *LLMClient) {
+		if enabled {
+			c.cache = NewCache()
+		} else {
+			c.cache = nil
+		}
+	}
+}
+
 // NewLLMClient creates a new BlockRun LLM client.
 //
 // If privateKey is empty, it will be read from the BLOCKRUN_WALLET_KEY or
@@ -169,6 +182,11 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, model string, messages [
 	}
 
 	return &chatResp, nil
+}
+
+// GetCostSummary returns an aggregate summary of all costs logged to the persistent JSONL file.
+func (c *LLMClient) GetCostSummary() (*CostSummary, error) {
+	return c.costLog.Summary()
 }
 
 // ListModels returns the list of available models with pricing.
