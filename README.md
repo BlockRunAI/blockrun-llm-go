@@ -55,6 +55,7 @@ func main() {
 | Feature | Description |
 |---------|-------------|
 | **Chat & Completion** | OpenAI-compatible chat with 40+ models |
+| **Anthropic Client** | Native Anthropic Messages API with automatic x402 payments |
 | **Smart Routing** | Auto-selects the best model for your prompt |
 | **Streaming** | SSE streaming for real-time responses |
 | **Tool Calling** | OpenAI-compatible function/tool calling |
@@ -66,6 +67,81 @@ func main() {
 | **Cost Tracking** | Session spending + persistent JSONL log |
 | **Balance Checking** | Query USDC balance via Base chain RPC |
 | **Agent Wallet Setup** | Auto-create wallets for autonomous agents |
+
+## Anthropic Client
+
+Use the native Anthropic Messages API format with BlockRun's x402 payment gateway.
+Works with Claude models and any other BlockRun model (OpenAI, Google, etc.) via Anthropic message format.
+
+```go
+client, err := blockrun.NewAnthropicClient("")  // uses BLOCKRUN_WALLET_KEY env var
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := client.Messages.Create(ctx, blockrun.AnthropicCreateParams{
+    Model:     "claude-sonnet-4-6",
+    MaxTokens: 1024,
+    Messages: []blockrun.AnthropicMessage{
+        {Role: "user", Content: "Hello!"},
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(resp.Text())  // convenience method for text responses
+fmt.Println(resp.StopReason)  // "end_turn", "max_tokens", "tool_use", "stop_sequence"
+fmt.Printf("Tokens: %d in / %d out\n", resp.Usage.InputTokens, resp.Usage.OutputTokens)
+```
+
+With system prompt and tools:
+
+```go
+temp := 0.7
+resp, err := client.Messages.Create(ctx, blockrun.AnthropicCreateParams{
+    Model:     "claude-sonnet-4-6",
+    MaxTokens: 2048,
+    System:    "You are a helpful assistant.",
+    Temperature: &temp,
+    Tools: []blockrun.AnthropicTool{
+        {
+            Name:        "get_weather",
+            Description: "Get current weather for a location",
+            InputSchema: map[string]any{
+                "type": "object",
+                "properties": map[string]any{
+                    "location": map[string]any{"type": "string"},
+                },
+                "required": []string{"location"},
+            },
+        },
+    },
+    Messages: []blockrun.AnthropicMessage{
+        {Role: "user", Content: "What's the weather in Tokyo?"},
+    },
+})
+```
+
+Multi-turn conversation with content blocks:
+
+```go
+messages := []blockrun.AnthropicMessage{
+    {Role: "user", Content: "Analyze this image"},
+    {
+        Role: "user",
+        Content: []blockrun.AnthropicContentBlock{
+            {
+                Type: "image",
+                Source: &blockrun.AnthropicImageSource{
+                    Type:      "base64",
+                    MediaType: "image/png",
+                    Data:      "<base64-encoded-image>",
+                },
+            },
+        },
+    },
+}
+```
 
 ## Chat
 
