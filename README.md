@@ -320,6 +320,8 @@ result, err := client.PMQuery(ctx, "polymarket/query", map[string]any{
 
 ## Image Generation
 
+Supported models include `openai/dall-e-3`, `openai/gpt-image-1`, `google/nano-banana`, `google/nano-banana-pro`, `zai/cogview-4`, `xai/grok-imagine-image` ($0.02/image), and `xai/grok-imagine-image-pro` ($0.07/image).
+
 ```go
 imageClient, err := blockrun.NewImageClient("")
 
@@ -327,8 +329,29 @@ result, err := imageClient.Generate(ctx, "A cat astronaut on Mars", &blockrun.Im
     Model: "openai/dall-e-3",
     Size:  "1024x1024",
 })
-fmt.Println(result.Data[0].URL)
+fmt.Println(result.Data[0].URL)       // permanent blockrun-hosted URL
+fmt.Println(result.Data[0].SourceURL) // original upstream URL
+fmt.Println(result.Data[0].BackedUp)  // true when gateway mirrored to GCS
 ```
+
+## Video Generation
+
+Generate short AI videos with xAI's Grok Imagine Video at $0.05/sec (8s default → $0.42/clip).
+
+```go
+videoClient, err := blockrun.NewVideoClient("")
+
+result, err := videoClient.Generate(ctx, "a red apple slowly spinning on a wooden table", nil)
+fmt.Println(result.Data[0].URL)             // permanent MP4 URL
+fmt.Println(result.Data[0].DurationSeconds) // 8
+
+// Image-to-video
+result, err = videoClient.Generate(ctx, "the subject turns and smiles", &blockrun.VideoGenerateOptions{
+    ImageURL: "https://example.com/portrait.jpg",
+})
+```
+
+The client blocks until the video is ready (30-120s typical) because the gateway handles the xAI polling internally.
 
 ## Response Caching
 
