@@ -86,6 +86,10 @@ type ImageGenerateOptions struct {
 // ImageData represents a single generated image.
 type ImageData struct {
 	URL           string `json:"url"`
+	// SourceURL is the original upstream URL (e.g. imgen.x.ai). Omitted for data URIs.
+	SourceURL string `json:"source_url,omitempty"`
+	// BackedUp is true when the gateway mirrored the image to its GCS bucket.
+	BackedUp      bool   `json:"backed_up,omitempty"`
 	RevisedPrompt string `json:"revised_prompt,omitempty"`
 	B64JSON       string `json:"b64_json,omitempty"`
 }
