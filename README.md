@@ -420,7 +420,8 @@ for _, w := range wallets {
 | **Google** | Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash | $0.10–$2.00 | $0.40–$12.00 |
 | **xAI** | Grok 4.1 Fast, Grok 3, Grok Code Fast 1 | $0.20–$3.00 | $0.50–$15.00 |
 | **DeepSeek** | DeepSeek Chat, DeepSeek Reasoner | $0.28 | $0.42 |
-| **Moonshot** | Kimi K2.5 (262K context) | $0.60 | $3.00 |
+| **Moonshot** | Kimi K2.6 (256K, vision + reasoning) | $0.95 | $4.00 |
+| **Moonshot** | Kimi K2.5 (262K context, legacy) | $0.60 | $3.00 |
 | **NVIDIA** | GPT-OSS 120B | **FREE** | **FREE** |
 
 Use `client.ListModels(ctx)` for the full list with current pricing.
