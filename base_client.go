@@ -204,6 +204,168 @@ func (bc *baseClient) doGet(ctx context.Context, endpoint string) ([]byte, error
 	return data, nil
 }
 
+// doGetWithPayment issues a GET, and if it comes back 402, signs the payment
+// and retries. This is used for Pyth-backed market-data endpoints where the
+// same path may be free (crypto/fx/commodity) or paid (stocks/usstock).
+func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, query map[string]string) ([]byte, error) {
+	url := bc.apiURL + endpoint
+	if len(query) > 0 {
+		sep := "?"
+		for k, v := range query {
+			url += sep + k + "=" + urlQueryEscape(v)
+			sep = "&"
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := bc.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusPaymentRequired {
+		if bc.privateKey == nil {
+			return nil, &PaymentError{Message: "endpoint returned 402 but no wallet is configured"}
+		}
+		return bc.handleGetPaymentAndRetry(ctx, url, resp)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("API error: %s", string(bodyBytes)),
+		}
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// handleGetPaymentAndRetry mirrors handlePaymentAndRetry for GET requests
+// (no body to re-send; PAYMENT-SIGNATURE rides on a second GET to the same URL).
+func (bc *baseClient) handleGetPaymentAndRetry(ctx context.Context, url string, resp *http.Response) ([]byte, error) {
+	paymentHeader := resp.Header.Get("payment-required")
+	if paymentHeader == "" {
+		var respBody map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&respBody); err == nil {
+			if _, ok := respBody["x402"]; ok {
+				jsonBytes, _ := json.Marshal(respBody["x402"])
+				paymentHeader = string(jsonBytes)
+			} else if _, ok := respBody["accepts"]; ok {
+				jsonBytes, _ := json.Marshal(respBody)
+				paymentHeader = string(jsonBytes)
+			}
+		}
+	}
+	if paymentHeader == "" {
+		return nil, &PaymentError{Message: "402 response but no payment requirements found"}
+	}
+
+	paymentReq, err := ParsePaymentRequired(paymentHeader)
+	if err != nil {
+		return nil, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
+	}
+	paymentOption, err := ExtractPaymentDetails(paymentReq)
+	if err != nil {
+		return nil, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
+	}
+
+	resourceURL := paymentReq.Resource.URL
+	if resourceURL == "" {
+		resourceURL = url
+	}
+
+	paymentPayload, err := CreatePaymentPayload(
+		bc.privateKey,
+		paymentOption.PayTo,
+		paymentOption.Amount,
+		paymentOption.Network,
+		resourceURL,
+		paymentReq.Resource.Description,
+		paymentOption.MaxTimeoutSeconds,
+		paymentOption.Extra,
+		paymentReq.Extensions,
+	)
+	if err != nil {
+		return nil, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
+	}
+
+	retryReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create retry request: %w", err)
+	}
+	retryReq.Header.Set("PAYMENT-SIGNATURE", paymentPayload)
+
+	retryResp, err := bc.httpClient.Do(retryReq)
+	if err != nil {
+		return nil, fmt.Errorf("retry request failed: %w", err)
+	}
+	defer retryResp.Body.Close()
+
+	if retryResp.StatusCode == http.StatusPaymentRequired {
+		return nil, &PaymentError{Message: "Payment was rejected. Check your wallet balance."}
+	}
+	if retryResp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(retryResp.Body)
+		return nil, &APIError{
+			StatusCode: retryResp.StatusCode,
+			Message:    fmt.Sprintf("API error after payment: %s", string(bodyBytes)),
+		}
+	}
+
+	respBytes, err := io.ReadAll(retryResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	bc.mu.Lock()
+	bc.sessionCalls++
+	var costUSD float64
+	if amountStr := paymentOption.Amount; amountStr != "" {
+		var amountMicro float64
+		if _, err := fmt.Sscanf(amountStr, "%f", &amountMicro); err == nil {
+			costUSD = amountMicro / 1_000_000
+			bc.sessionTotalUSD += costUSD
+		}
+	}
+	bc.mu.Unlock()
+
+	if bc.costLog != nil && costUSD > 0 {
+		endpoint := strings.TrimPrefix(url, bc.apiURL)
+		if idx := strings.Index(endpoint, "?"); idx != -1 {
+			endpoint = endpoint[:idx]
+		}
+		bc.costLog.Append(endpoint, costUSD)
+	}
+
+	return respBytes, nil
+}
+
+// urlQueryEscape is a minimal query-string escaper used by doGetWithPayment.
+// It avoids pulling in net/url just for this single use site.
+func urlQueryEscape(s string) string {
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case 'A' <= c && c <= 'Z', 'a' <= c && c <= 'z', '0' <= c && c <= '9',
+			c == '-', c == '_', c == '.', c == '~':
+			b.WriteByte(c)
+		default:
+			b.WriteByte('%')
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&15])
+		}
+	}
+	return b.String()
+}
+
 // handlePaymentAndRetry handles a 402 response by signing a payment and retrying.
 func (bc *baseClient) handlePaymentAndRetry(ctx context.Context, url string, body []byte, resp *http.Response) ([]byte, error) {
 	// Get payment required header

@@ -12,10 +12,16 @@ import "fmt"
 
 // ChatMessage represents a message in the conversation.
 type ChatMessage struct {
-	Role       string     `json:"role"`                  // "system", "user", "assistant", or "tool"
-	Content    string     `json:"content"`               // Message content
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`  // Tool calls from assistant
+	Role       string     `json:"role"`                   // "system", "user", "assistant", or "tool"
+	Content    string     `json:"content"`                // Message content
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // Tool calls from assistant
 	ToolCallID string     `json:"tool_call_id,omitempty"` // ID of the tool call this message responds to
+	// Extended fields returned by reasoning-capable upstream providers
+	// (DeepSeek Reasoner, Grok 4 / 4.20 reasoning, xAI multi-agent, etc.).
+	// Backend strips these from inbound requests but may forward them on
+	// the response side, so we accept them as optional.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Thinking         string `json:"thinking,omitempty"`
 }
 
 // ChatCompletionOptions contains optional parameters for chat completion.
@@ -105,6 +111,10 @@ type Usage struct {
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 	NumSourcesUsed   int `json:"num_sources_used,omitempty"` // xAI Live Search sources used
+	// Anthropic prompt caching — populated on anthropic/* models when cache
+	// headers are sent. Reads are cheaper; writes incur a one-time surcharge.
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 }
 
 // Model represents an available model from the API.
@@ -112,10 +122,16 @@ type Model struct {
 	ID           string  `json:"id"`
 	Name         string  `json:"name"`
 	Provider     string  `json:"provider"`
-	InputPrice   float64 `json:"inputPrice"`   // per 1M tokens
-	OutputPrice  float64 `json:"outputPrice"`  // per 1M tokens
-	ContextLimit int     `json:"contextLimit"` // max tokens
+	InputPrice   float64 `json:"inputPrice"`     // per 1M tokens (0 when BillingMode != "paid")
+	OutputPrice  float64 `json:"outputPrice"`    // per 1M tokens (0 when BillingMode != "paid")
+	ContextLimit int     `json:"contextLimit"`   // max tokens
 	Type         string  `json:"type,omitempty"` // "llm" or "image" (for listAllModels)
+	// Extended metadata surfaced by /v1/models. BillingMode is one of
+	// "paid" (per-token), "flat" (FlatPrice per request) or "free".
+	BillingMode string   `json:"billing_mode,omitempty"`
+	FlatPrice   float64  `json:"flat_price,omitempty"`
+	Categories  []string `json:"categories,omitempty"` // e.g. ["chat","reasoning","coding","vision"]
+	Hidden      bool     `json:"hidden,omitempty"`     // true for deprecated/superseded but still routable
 }
 
 // AllModel represents a model from either LLM or image generation.
