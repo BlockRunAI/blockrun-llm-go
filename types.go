@@ -8,7 +8,14 @@
 // 4. Your actual private key is NEVER transmitted to any server
 package blockrun
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
+
+// jsonUnmarshal is aliased so the Model UnmarshalJSON can call encoding/json
+// without risking infinite recursion through its own method.
+var jsonUnmarshal = json.Unmarshal
 
 // ChatMessage represents a message in the conversation.
 type ChatMessage struct {
@@ -117,21 +124,120 @@ type Usage struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 }
 
+// ModelPricing mirrors the nested { input, output } / { flat } shape that
+// /v1/models returns in the "pricing" key.
+type ModelPricing struct {
+	Input  float64 `json:"input,omitempty"`
+	Output float64 `json:"output,omitempty"`
+	Flat   float64 `json:"flat,omitempty"`
+}
+
 // Model represents an available model from the API.
+//
+// The struct has a custom UnmarshalJSON that accepts both the real API shape
+// (owned_by / context_window / max_output / nested pricing) and the legacy
+// flat shape used by older SDK code + mock tests. Callers can read either
+// the new fields (Pricing.Input, ContextWindow) or the legacy aliases
+// (InputPrice, ContextLimit) — they are kept in sync during unmarshalling.
 type Model struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	Provider     string  `json:"provider"`
-	InputPrice   float64 `json:"inputPrice"`     // per 1M tokens (0 when BillingMode != "paid")
-	OutputPrice  float64 `json:"outputPrice"`    // per 1M tokens (0 when BillingMode != "paid")
-	ContextLimit int     `json:"contextLimit"`   // max tokens
-	Type         string  `json:"type,omitempty"` // "llm" or "image" (for listAllModels)
-	// Extended metadata surfaced by /v1/models. BillingMode is one of
-	// "paid" (per-token), "flat" (FlatPrice per request) or "free".
-	BillingMode string   `json:"billing_mode,omitempty"`
-	FlatPrice   float64  `json:"flat_price,omitempty"`
-	Categories  []string `json:"categories,omitempty"` // e.g. ["chat","reasoning","coding","vision"]
-	Hidden      bool     `json:"hidden,omitempty"`     // true for deprecated/superseded but still routable
+	ID          string   `json:"id"`
+	Object      string   `json:"object,omitempty"`
+	Created     int64    `json:"created,omitempty"`
+	Name        string   `json:"name,omitempty"`
+	Description string   `json:"description,omitempty"`
+	// Provider is populated from either "owned_by" (real API) or "provider"
+	// (legacy mock). Tag stays "owned_by" so Marshal emits the canonical key.
+	Provider       string       `json:"owned_by,omitempty"`
+	ContextWindow  int          `json:"context_window,omitempty"`
+	MaxOutput      int          `json:"max_output,omitempty"`
+	Categories     []string     `json:"categories,omitempty"`
+	BillingMode    string       `json:"billing_mode,omitempty"`
+	Pricing        ModelPricing `json:"pricing,omitempty"`
+	// Legacy flat fields — populated from Pricing / ContextWindow for
+	// backward compatibility with callers written against the old struct.
+	// They carry `json:"-"` so Marshal doesn't emit duplicate keys.
+	InputPrice   float64 `json:"-"`
+	OutputPrice  float64 `json:"-"`
+	FlatPrice    float64 `json:"-"`
+	ContextLimit int     `json:"-"`
+	// Type is set by ListAllModels to mark whether an entry came from the
+	// LLM or image catalogue; not emitted by /v1/models itself.
+	Type string `json:"type,omitempty"`
+	// Hidden is reserved for deprecated/superseded entries. The backend
+	// filters hidden models before sending, but downstream tooling may set
+	// this when forwarding the full catalogue.
+	Hidden bool `json:"hidden,omitempty"`
+}
+
+// UnmarshalJSON reads both real API responses (nested pricing, owned_by,
+// context_window) and the legacy flat shape used by tests, and keeps the
+// legacy aliases InputPrice / OutputPrice / ContextLimit in sync with the
+// canonical nested fields.
+func (m *Model) UnmarshalJSON(data []byte) error {
+	type raw struct {
+		ID            string          `json:"id"`
+		Object        string          `json:"object,omitempty"`
+		Created       int64           `json:"created,omitempty"`
+		Name          string          `json:"name,omitempty"`
+		Description   string          `json:"description,omitempty"`
+		OwnedBy       string          `json:"owned_by,omitempty"`
+		Provider      string          `json:"provider,omitempty"` // legacy
+		ContextWindow int             `json:"context_window,omitempty"`
+		ContextLimit  int             `json:"contextLimit,omitempty"` // legacy
+		MaxOutput     int             `json:"max_output,omitempty"`
+		Categories    []string        `json:"categories,omitempty"`
+		BillingMode   string          `json:"billing_mode,omitempty"`
+		Pricing       *ModelPricing   `json:"pricing,omitempty"`
+		InputPrice    float64         `json:"inputPrice,omitempty"`  // legacy
+		OutputPrice   float64         `json:"outputPrice,omitempty"` // legacy
+		FlatPrice     float64         `json:"flat_price,omitempty"`  // legacy
+		Type          string          `json:"type,omitempty"`
+		Hidden        bool            `json:"hidden,omitempty"`
+	}
+	var r raw
+	if err := jsonUnmarshal(data, &r); err != nil {
+		return err
+	}
+
+	m.ID = r.ID
+	m.Object = r.Object
+	m.Created = r.Created
+	m.Name = r.Name
+	m.Description = r.Description
+	if r.OwnedBy != "" {
+		m.Provider = r.OwnedBy
+	} else {
+		m.Provider = r.Provider
+	}
+	m.Categories = r.Categories
+	m.BillingMode = r.BillingMode
+	m.Type = r.Type
+	m.Hidden = r.Hidden
+
+	if r.ContextWindow > 0 {
+		m.ContextWindow = r.ContextWindow
+	} else {
+		m.ContextWindow = r.ContextLimit
+	}
+	m.MaxOutput = r.MaxOutput
+	m.ContextLimit = m.ContextWindow
+
+	if r.Pricing != nil {
+		m.Pricing = *r.Pricing
+	}
+	if m.Pricing.Input == 0 && r.InputPrice > 0 {
+		m.Pricing.Input = r.InputPrice
+	}
+	if m.Pricing.Output == 0 && r.OutputPrice > 0 {
+		m.Pricing.Output = r.OutputPrice
+	}
+	if m.Pricing.Flat == 0 && r.FlatPrice > 0 {
+		m.Pricing.Flat = r.FlatPrice
+	}
+	m.InputPrice = m.Pricing.Input
+	m.OutputPrice = m.Pricing.Output
+	m.FlatPrice = m.Pricing.Flat
+	return nil
 }
 
 // AllModel represents a model from either LLM or image generation.
