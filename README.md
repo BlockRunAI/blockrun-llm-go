@@ -302,6 +302,40 @@ result, err := client.Search(ctx, "Go 1.23 features", &blockrun.SearchOptions{
 })
 ```
 
+## Market Data (Pyth)
+
+Realtime quotes and OHLC history for crypto, FX, commodities and 12 global
+equity markets. Crypto / FX / commodity are free across price, history and
+list; equities (`stocks/{market}` and the `usstock` alias) charge $0.001
+per price or history call. The client handles x402 transparently on both
+paths — `NewLLMClient` still requires a wallet for the paid routes.
+
+```go
+// Free — BTC spot price
+btc, err := client.Price(ctx, blockrun.CategoryCrypto, "BTC-USD", nil)
+fmt.Println(btc.Price)
+
+// Paid — US equity quote (market is required for CategoryStocks)
+aapl, err := client.Price(ctx, blockrun.CategoryStocks, "AAPL",
+    &blockrun.PriceOptions{Market: "us"})
+
+// Historical bars (free for crypto, paid for stocks)
+bars, err := client.History(ctx, blockrun.CategoryStocks, "AAPL",
+    &blockrun.HistoryOptions{
+        PriceOptions: blockrun.PriceOptions{Market: "us"},
+        Resolution:   "D",
+        From:         1700000000,
+        To:           1710000000,
+    })
+
+// Discovery — always free
+symbols, err := client.ListSymbols(ctx, blockrun.CategoryCrypto,
+    &blockrun.ListOptions{Query: "sol", Limit: 20})
+```
+
+Supported markets for `CategoryStocks`: `us, hk, jp, kr, gb, de, fr, nl,
+ie, lu, cn, ca`.
+
 ## Prediction Markets
 
 Access Polymarket, Kalshi, and more via Predexon.
