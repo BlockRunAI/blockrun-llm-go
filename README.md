@@ -184,10 +184,16 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 
 | Profile | Simple | Medium | Complex | Reasoning |
 |---------|--------|--------|---------|-----------|
-| **free** | nvidia/gpt-oss-120b | nvidia/gpt-oss-120b | nvidia/gpt-oss-120b | nvidia/gpt-oss-120b |
-| **eco** | nvidia/kimi-k2.5 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
-| **auto** | nvidia/kimi-k2.5 | google/gemini-2.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
+| **free** | nvidia/gpt-oss-120b | nvidia/deepseek-v3.2 | nvidia/qwen3-next-80b-a3b-thinking | nvidia/qwen3-next-80b-a3b-thinking |
+| **eco** | moonshot/kimi-k2.5 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
+| **auto** | moonshot/kimi-k2.5 | google/gemini-2.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
 | **premium** | google/gemini-2.5-flash | openai/gpt-5.4 | anthropic/claude-opus-4.5 | openai/o3 |
+
+> NVIDIA free tier refreshed 2026-04-21. Retired IDs (`nvidia/nemotron-*`,
+> `nvidia/mistral-large-3-675b`, `nvidia/devstral-2-123b`,
+> `nvidia/qwen3.5-397b-a17b`, and paid `nvidia/kimi-k2.5`) still resolve via
+> backend redirects but the routing table now points at the canonical
+> successors.
 
 ## Streaming
 
