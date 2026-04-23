@@ -13,6 +13,13 @@ const (
 	// DefaultVideoModel is the default video generation model.
 	DefaultVideoModel = "xai/grok-imagine-video"
 
+	// Available video models (pass as VideoGenerateOptions.Model):
+	//   xai/grok-imagine-video       $0.05/sec, 8s default
+	//   bytedance/seedance-1.5-pro   $0.03/sec, 5s default up to 10s, 720p
+	//   bytedance/seedance-2.0-fast  $0.15/sec, ~60-80s gen, sweet spot
+	//   bytedance/seedance-2.0       $0.30/sec, 720p Pro
+	// The client passes Model through; no enum gating.
+
 	// DefaultVideoTimeout is the default timeout for video generation
 	// (video gen + polling can take up to 3 minutes).
 	DefaultVideoTimeout = 300 * time.Second
@@ -20,9 +27,10 @@ const (
 
 // VideoClient is the BlockRun Video Generation client.
 //
-// Generates short AI videos using xAI's Grok Imagine Video via x402
-// micropayments on Base chain. The client blocks until the video is
-// ready because the gateway handles async polling internally.
+// Generates short AI videos via x402 micropayments on Base chain. The
+// client blocks until the video is ready because the gateway handles
+// async polling internally. Supports xAI Grok Imagine Video and
+// ByteDance Seedance (1.5-pro / 2.0-fast / 2.0).
 //
 // SECURITY: Your private key is used ONLY for local EIP-712 signing.
 // The key NEVER leaves your machine - only signatures are transmitted.

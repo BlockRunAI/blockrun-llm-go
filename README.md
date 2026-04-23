@@ -62,7 +62,8 @@ func main() {
 | **X/Twitter Data** | 15 endpoints for users, tweets, search, analytics |
 | **Web Search** | Search web, X/Twitter, and news |
 | **Prediction Markets** | Polymarket, Kalshi data access |
-| **Image Generation** | DALL-E 3, Nano Banana, Flux models |
+| **Image Generation** | DALL-E 3, GPT Image 1/2, Nano Banana, Flux, CogView-4, Grok Imagine |
+| **Video Generation** | Grok Imagine Video, ByteDance Seedance (1.5-pro / 2.0-fast / 2.0) |
 | **Response Caching** | Local cache with per-endpoint TTL |
 | **Cost Tracking** | Session spending + persistent JSONL log |
 | **Balance Checking** | Query USDC balance via Base chain RPC |
@@ -360,7 +361,7 @@ result, err := client.PMQuery(ctx, "polymarket/query", map[string]any{
 
 ## Image Generation
 
-Supported models include `openai/dall-e-3`, `openai/gpt-image-1`, `google/nano-banana`, `google/nano-banana-pro`, `zai/cogview-4`, `xai/grok-imagine-image` ($0.02/image), and `xai/grok-imagine-image-pro` ($0.07/image).
+Supported models: `openai/dall-e-3`, `openai/gpt-image-1`, `openai/gpt-image-2` (ChatGPT Images 2.0 — reasoning-driven, $0.06–0.12/image), `google/nano-banana`, `google/nano-banana-pro`, `zai/cogview-4`, `black-forest/flux-1.1-pro`, `xai/grok-imagine-image` ($0.02/image), `xai/grok-imagine-image-pro` ($0.07/image). `openai/gpt-image-1` and `openai/gpt-image-2` also support the edit endpoint via `client.Edit()`.
 
 ```go
 imageClient, err := blockrun.NewImageClient("")
@@ -376,22 +377,30 @@ fmt.Println(result.Data[0].BackedUp)  // true when gateway mirrored to GCS
 
 ## Video Generation
 
-Generate short AI videos with xAI's Grok Imagine Video at $0.05/sec (8s default → $0.42/clip).
+Supported models:
+
+| Model | Price |
+|-------|-------|
+| `xai/grok-imagine-video` | $0.05/sec (8s default → $0.42/clip) |
+| `bytedance/seedance-1.5-pro` | $0.03/sec (5s default, up to 10s, 720p) |
+| `bytedance/seedance-2.0-fast` | $0.15/sec (~60-80s gen, sweet-spot price/quality) |
+| `bytedance/seedance-2.0` | $0.30/sec (720p Pro) |
 
 ```go
 videoClient, err := blockrun.NewVideoClient("")
 
 result, err := videoClient.Generate(ctx, "a red apple slowly spinning on a wooden table", nil)
 fmt.Println(result.Data[0].URL)             // permanent MP4 URL
-fmt.Println(result.Data[0].DurationSeconds) // 8
+fmt.Println(result.Data[0].DurationSeconds) // 8 for xAI default, 5 for Seedance
 
-// Image-to-video
+// Image-to-video (Seedance — cheaper)
 result, err = videoClient.Generate(ctx, "the subject turns and smiles", &blockrun.VideoGenerateOptions{
+    Model:    "bytedance/seedance-1.5-pro",
     ImageURL: "https://example.com/portrait.jpg",
 })
 ```
 
-The client blocks until the video is ready (30-120s typical) because the gateway handles the xAI polling internally.
+The client blocks until the video is ready (30-120s typical; Seedance is hard-capped at 85s upstream) because the gateway handles async polling internally.
 
 ## Response Caching
 

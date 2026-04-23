@@ -2,6 +2,18 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.3.0
+
+- **New image model: `openai/gpt-image-2`** (ChatGPT Images 2.0). Reasoning-driven generation with multilingual text rendering + character consistency. Pricing: $0.06 (1024²), $0.12 (1536×1024 / 1024×1536). Also supported by `client.Edit()` alongside `gpt-image-1`.
+- **New video models: 3 ByteDance Seedance variants** on `VideoClient`:
+  - `bytedance/seedance-1.5-pro` — $0.03/sec, 720p, 5s default (up to 10s).
+  - `bytedance/seedance-2.0-fast` — $0.15/sec, ~60-80s generation, sweet-spot price/quality.
+  - `bytedance/seedance-2.0` — $0.30/sec, 720p Pro quality.
+  All support text-to-video and image-to-video. No SDK surface change — pass the model ID via `VideoGenerateOptions.Model`.
+- `video.go`: `VideoClient` doc comment no longer claims xAI-only.
+- `image.go` + `video.go`: header comments enumerate available models + pricing for discoverability.
+- README: Image line mentions gpt-image-2; Video section now a proper table listing all 4 models; new Video feature row in the capability matrix.
+
 ## 0.2.1
 
 - **NVIDIA free-tier refresh (backend 2026-04-21).** Retired `nvidia/nemotron-*`, `nvidia/mistral-large-3-675b`, `nvidia/devstral-2-123b`, `nvidia/qwen3.5-397b-a17b`, and paid `nvidia/kimi-k2.5`. The routing table in `router.go` now references the survivors + the two new models:

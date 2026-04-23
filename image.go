@@ -13,6 +13,17 @@ const (
 	// DefaultImageModel is the default image generation model.
 	DefaultImageModel = "google/nano-banana"
 
+	// Available image models (pass as ImageGenerateOptions.Model):
+	//   openai/dall-e-3          $0.04-0.08/image
+	//   openai/gpt-image-1       $0.02-0.04/image  (also supports edit)
+	//   openai/gpt-image-2       $0.06-0.12/image  (ChatGPT Images 2.0, also supports edit)
+	//   google/nano-banana       $0.05/image
+	//   google/nano-banana-pro   $0.10-0.15/image
+	//   black-forest/flux-1.1-pro $0.04/image
+	//   xai/grok-imagine-image     $0.02/image
+	//   xai/grok-imagine-image-pro $0.07/image
+	//   zai/cogview-4            $0.015/image
+
 	// DefaultImageSize is the default image size.
 	DefaultImageSize = "1024x1024"
 
