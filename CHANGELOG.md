@@ -2,6 +2,11 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.4.0
+
+- **New flagship model: `openai/gpt-5.5`** (released 2026-04-23, first fully retrained base since GPT-4.5). 1M context, 128K output, native agent + computer use. Pricing $5.00 / $30.00 per 1M tokens.
+- **Smart router: `RoutingPremium.TierMedium` now points at `openai/gpt-5.5`** (was `gpt-5.4`). Free / Eco / Auto profiles unchanged. README routing table updated to match.
+
 ## 0.3.0
 
 - **New image model: `openai/gpt-image-2`** (ChatGPT Images 2.0). Reasoning-driven generation with multilingual text rendering + character consistency. Pricing: $0.06 (1024²), $0.12 (1536×1024 / 1024×1536). Also supported by `client.Edit()` alongside `gpt-image-1`.

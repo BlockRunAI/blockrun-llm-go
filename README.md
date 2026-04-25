@@ -188,7 +188,7 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 | **free** | nvidia/gpt-oss-120b | nvidia/deepseek-v3.2 | nvidia/qwen3-next-80b-a3b-thinking | nvidia/qwen3-next-80b-a3b-thinking |
 | **eco** | moonshot/kimi-k2.5 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
 | **auto** | moonshot/kimi-k2.5 | google/gemini-2.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
-| **premium** | google/gemini-2.5-flash | openai/gpt-5.4 | anthropic/claude-opus-4.5 | openai/o3 |
+| **premium** | google/gemini-2.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.5 | openai/o3 |
 
 > NVIDIA free tier refreshed 2026-04-21. Retired IDs (`nvidia/nemotron-*`,
 > `nvidia/mistral-large-3-675b`, `nvidia/devstral-2-123b`,
@@ -464,7 +464,7 @@ for _, w := range wallets {
 
 | Provider | Models | Input $/M | Output $/M |
 |----------|--------|-----------|------------|
-| **OpenAI** | GPT-5.2, GPT-5.2 Codex, GPT-5 Mini, GPT-4o, GPT-4o-mini | $0.05–$21.00 | $0.40–$168.00 |
+| **OpenAI** | GPT-5.5, GPT-5.4, GPT-5.2, GPT-5.2 Codex, GPT-5 Mini, GPT-4o, GPT-4o-mini | $0.05–$30.00 | $0.40–$180.00 |
 | **Anthropic** | Claude Opus 4.6, Claude Sonnet 4.6, Claude Haiku 4.5 | $1.00–$5.00 | $5.00–$25.00 |
 | **Google** | Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash | $0.10–$2.00 | $0.40–$12.00 |
 | **xAI** | Grok 4.1 Fast, Grok 3, Grok Code Fast 1 | $0.20–$3.00 | $0.50–$15.00 |
