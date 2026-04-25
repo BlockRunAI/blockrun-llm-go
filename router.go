@@ -72,7 +72,7 @@ var routingTable = map[RoutingProfile]map[RoutingTier]string{
 		TierComplex: "google/gemini-3.1-pro", TierReasoning: "deepseek/deepseek-reasoner",
 	},
 	RoutingPremium: {
-		TierSimple: "google/gemini-2.5-flash", TierMedium: "openai/gpt-5.4",
+		TierSimple: "google/gemini-2.5-flash", TierMedium: "openai/gpt-5.5",
 		TierComplex: "anthropic/claude-opus-4.5", TierReasoning: "openai/o3",
 	},
 }
