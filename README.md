@@ -186,8 +186,8 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 | Profile | Simple | Medium | Complex | Reasoning |
 |---------|--------|--------|---------|-----------|
 | **free** | nvidia/gpt-oss-120b | nvidia/deepseek-v3.2 | nvidia/qwen3-next-80b-a3b-thinking | nvidia/qwen3-next-80b-a3b-thinking |
-| **eco** | moonshot/kimi-k2.5 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
-| **auto** | moonshot/kimi-k2.5 | google/gemini-2.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
+| **eco** | moonshot/kimi-k2.6 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
+| **auto** | moonshot/kimi-k2.6 | google/gemini-2.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
 | **premium** | google/gemini-2.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.5 | openai/o3 |
 
 > NVIDIA free tier refreshed 2026-04-21. Retired IDs (`nvidia/nemotron-*`,

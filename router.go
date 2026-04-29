@@ -53,22 +53,24 @@ type SmartChatOptions struct {
 
 // routingTable maps (profile, tier) to the model to use.
 //
+// Moonshot flagship promotion (2026-04-29): kimi-k2.6 is now the catalog
+// flagship (256K context, vision + reasoning_content). kimi-k2.5 is hidden
+// in /v1/models as superseded; chat completions still serves it for clients
+// pinned to its pricing, but the SmartChat default now points at k2.6.
+//
 // NVIDIA free-tier refresh (2026-04-21) retired nemotron-*, qwen3.5-397b,
-// mistral-large-3-675b, devstral-2-123b, and nvidia/kimi-k2.5 (paid). The
-// Eco/Auto Simple entries point at moonshot/kimi-k2.5 directly — the
-// backend still redirects nvidia/kimi-k2.5 there but referencing the
-// canonical target keeps offline routing honest.
+// mistral-large-3-675b, devstral-2-123b, and nvidia/kimi-k2.5 (paid).
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	RoutingFree: {
 		TierSimple: "nvidia/gpt-oss-120b", TierMedium: "nvidia/deepseek-v3.2",
 		TierComplex: "nvidia/qwen3-next-80b-a3b-thinking", TierReasoning: "nvidia/qwen3-next-80b-a3b-thinking",
 	},
 	RoutingEco: {
-		TierSimple: "moonshot/kimi-k2.5", TierMedium: "deepseek/deepseek-chat",
+		TierSimple: "moonshot/kimi-k2.6", TierMedium: "deepseek/deepseek-chat",
 		TierComplex: "google/gemini-2.5-pro", TierReasoning: "deepseek/deepseek-reasoner",
 	},
 	RoutingAuto: {
-		TierSimple: "moonshot/kimi-k2.5", TierMedium: "google/gemini-2.5-flash",
+		TierSimple: "moonshot/kimi-k2.6", TierMedium: "google/gemini-2.5-flash",
 		TierComplex: "google/gemini-3.1-pro", TierReasoning: "deepseek/deepseek-reasoner",
 	},
 	RoutingPremium: {
