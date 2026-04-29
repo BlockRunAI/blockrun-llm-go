@@ -2,7 +2,7 @@
 
 > **blockrun-llm-go** is a Go SDK for accessing 40+ large language models and AI services with automatic pay-per-request USDC micropayments via the x402 protocol on Base chain. No API keys required — your wallet signature is your authentication.
 >
-> 🆓 **Includes 8 fully-free NVIDIA-hosted models** (Qwen3, Llama 4, GLM-4.7, GPT-OSS, DeepSeek V3.2, Mistral) — zero USDC, no rate-limit gimmicks. Use `blockrun.RoutingFree` or call any `nvidia/*` model directly.
+> 🆓 **Includes 9 fully-free NVIDIA-hosted models** — DeepSeek V4 Pro/Flash (1M context), Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral. Zero USDC, no rate-limit gimmicks. Use `blockrun.RoutingFree` or call any `nvidia/*` model directly.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/blockrunai/blockrun-llm-go.svg)](https://pkg.go.dev/github.com/blockrunai/blockrun-llm-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -54,22 +54,25 @@ reply, _ := client.Chat(ctx, "nvidia/qwen3-next-80b-a3b-thinking", "Explain x402
 result, _ := client.SmartChat(ctx, "What is 2+2?", &blockrun.SmartChatOptions{
     RoutingProfile: blockrun.RoutingFree,
 })
-fmt.Println(result.Model)    // e.g. "nvidia/gpt-oss-120b"
+fmt.Println(result.Model)    // e.g. "nvidia/deepseek-v4-flash"
 fmt.Println(result.Response) // "4"
 ```
 
-**Available free models** (input + output both $0, all NVIDIA-hosted, last refreshed 2026-04-21):
+**Available free models** (input + output both $0, all NVIDIA-hosted, last refreshed 2026-04-28):
 
-| Model ID | Context | Speed | Best For |
-|----------|---------|-------|----------|
-| `nvidia/qwen3-next-80b-a3b-thinking` | 131K | 116 tok/s | Reasoning flagship — thinking mode |
-| `nvidia/mistral-small-4-119b` | 131K | 114 tok/s | Fastest free chat |
-| `nvidia/glm-4.7` | 131K | 237 tok/s | GLM-4.7 with thinking mode |
-| `nvidia/llama-4-maverick` | 131K | — | Meta Llama 4 Maverick MoE |
-| `nvidia/qwen3-coder-480b` | 131K | — | Coding-optimised 480B MoE |
-| `nvidia/deepseek-v3.2` | 131K | — | DeepSeek V3.2 hosted |
-| `nvidia/gpt-oss-120b` | 128K | 123 tok/s | OpenAI open-weight 120B |
-| `nvidia/gpt-oss-20b` | 128K | 155 tok/s | OpenAI open-weight 20B (smallest, fastest) |
+| Model ID | Context | Best For |
+|----------|---------|----------|
+| `nvidia/deepseek-v4-pro` | 1M | Flagship reasoning — MMLU-Pro 87.5, GPQA 90.1, SWE-bench 80.6, LiveCodeBench 93.5 |
+| `nvidia/deepseek-v4-flash` | 1M | ~5× faster than V4 Pro — chat, summarization, light reasoning (weaker factual recall) |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | 256K | Only vision-capable free model — text + images + video (≤2 min) + audio (≤1 hr) |
+| `nvidia/qwen3-next-80b-a3b-thinking` | 131K | 116 tok/s reasoning with thinking mode |
+| `nvidia/mistral-small-4-119b` | 131K | 114 tok/s — fastest free chat |
+| `nvidia/glm-4.7` | 131K | 237 tok/s — GLM-4.7 with thinking mode |
+| `nvidia/llama-4-maverick` | 131K | Meta Llama 4 Maverick MoE |
+| `nvidia/qwen3-coder-480b` | 131K | Coding-optimised 480B MoE |
+| `nvidia/deepseek-v3.2` | 131K | Legacy V3.2 — auto-upgrades to V4 Pro via fallback |
+
+> Note: `nvidia/gpt-oss-120b` and `nvidia/gpt-oss-20b` were retired 2026-04-28 — NVIDIA's free build.nvidia.com tier reserves the right to use prompts/outputs for service improvement, which conflicts with our data-privacy policy.
 
 ## How It Works
 
@@ -216,16 +219,17 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 
 | Profile | Simple | Medium | Complex | Reasoning |
 |---------|--------|--------|---------|-----------|
-| **free** | nvidia/gpt-oss-120b | nvidia/deepseek-v3.2 | nvidia/qwen3-next-80b-a3b-thinking | nvidia/qwen3-next-80b-a3b-thinking |
+| **free** | nvidia/deepseek-v4-flash | nvidia/deepseek-v4-pro | nvidia/qwen3-next-80b-a3b-thinking | nvidia/deepseek-v4-pro |
 | **eco** | moonshot/kimi-k2.6 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
 | **auto** | moonshot/kimi-k2.6 | google/gemini-2.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
 | **premium** | google/gemini-2.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.5 | openai/o3 |
 
-> NVIDIA free tier refreshed 2026-04-21. Retired IDs (`nvidia/nemotron-*`,
-> `nvidia/mistral-large-3-675b`, `nvidia/devstral-2-123b`,
-> `nvidia/qwen3.5-397b-a17b`, and paid `nvidia/kimi-k2.5`) still resolve via
-> backend redirects but the routing table now points at the canonical
-> successors.
+> NVIDIA free tier refreshed 2026-04-28. Added `nvidia/deepseek-v4-pro`,
+> `nvidia/deepseek-v4-flash` (1M context), and `nvidia/nemotron-3-nano-omni`
+> (vision). Retired IDs (`nvidia/gpt-oss-120b`, `nvidia/gpt-oss-20b`,
+> `nvidia/nemotron-*`, `nvidia/mistral-large-3-675b`, `nvidia/devstral-2-123b`,
+> `nvidia/qwen3.5-397b-a17b`, paid `nvidia/kimi-k2.5`) — gpt-oss models pulled
+> over data-privacy concerns; the rest resolve via backend redirects.
 
 ## Streaming
 
@@ -502,7 +506,7 @@ for _, w := range wallets {
 | **DeepSeek** | DeepSeek Chat, DeepSeek Reasoner | $0.28 | $0.42 |
 | **Moonshot** | Kimi K2.6 (256K, vision + reasoning) | $0.95 | $4.00 |
 | **Moonshot** | Kimi K2.5 (262K context, legacy) | $0.60 | $3.00 |
-| **NVIDIA** | GPT-OSS 120B | **FREE** | **FREE** |
+| **NVIDIA** | DeepSeek V4 Pro/Flash, Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral (9 models) | **FREE** | **FREE** |
 
 Use `client.ListModels(ctx)` for the full list with current pricing.
 
@@ -549,7 +553,7 @@ if err != nil {
 A Go SDK for pay-per-request access to 40+ LLMs, X/Twitter data, web search, prediction markets, and image generation. Uses x402 micropayments — no API keys, no subscriptions.
 
 **How much does it cost?**
-Pay only for what you use. NVIDIA GPT-OSS 120B is free. $5 USDC gets you thousands of requests.
+Pay only for what you use. 9 NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 USDC gets you thousands of paid-model requests.
 
 **Does it support Solana?**
 The Go SDK supports Base chain only. For Solana, use the [Python SDK](https://github.com/blockrunai/blockrun-llm) or [TypeScript SDK](https://github.com/blockrunai/blockrun-llm-ts).
