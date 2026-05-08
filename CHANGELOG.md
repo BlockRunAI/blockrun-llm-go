@@ -2,6 +2,23 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.6.0
+
+- **Predexon v2 endpoints exposed via typed helpers.** All v2 endpoints went live in production on 2026-05-07 (`blockrun-web-00451-cnw`). The generic `PM()` / `PMQuery()` passthrough already routed them, but call sites can now discover the new shape from method names + godoc. Ten new methods on `*LLMClient` — each is a thin wrapper, no breaking changes:
+  - **Canonical cross-venue (Tier 1):** `PMMarkets`, `PMListings`, `PMOutcome`. Predexon's unified data layer with cross-venue IDs across Polymarket, Kalshi, Limitless, Opinion, Predict.Fun.
+  - **Polymarket keyset pagination (Tier 1):** `PMPolymarketMarketsKeyset`, `PMPolymarketEventsKeyset` — cursor-based for stable traversal of large result sets.
+  - **Sports markets (Tier 1):** `PMSportsCategories`, `PMSportsMarkets`.
+  - **Wallet identity & clustering (Tier 2):** `PMWalletIdentity` (GET), `PMWalletIdentities` (POST, validates ≤200 addresses), `PMWalletCluster` (GET on-chain relationship graph).
+- `PMQuery` godoc example updated from the retired `polymarket/search` POST endpoint to the live `polymarket/wallet/identities` bulk-identity POST.
+
+## 0.5.0
+
+- **DeepSeek V4 family in paid catalog.** Backend added `deepseek/deepseek-v4-pro` (1.6T MoE / 49B active, 1M context — strongest open-weight reasoner; **$0.50 in / $1.00 out per 1M under the 75% promo through 2026-05-31**, list $2.00/$4.00). The legacy `deepseek/deepseek-chat` and `deepseek/deepseek-reasoner` IDs are now V4 Flash non-thinking / thinking modes — repriced to **$0.20 in / $0.40 out per 1M, 1M context** (was $0.28/$0.42, 128K). `deepseek-chat` and `deepseek-reasoner` are still the eco-mode `TierMedium` and `TierReasoning` defaults; cost-sensitive callers automatically benefit from the new pricing without code changes.
+- **Smart router: free `TierMedium` repointed from hidden v3.2 → visible v4-flash.** `routingTable[RoutingFree][TierMedium]` was pinned to `nvidia/deepseek-v3.2`, which is now `hidden: true` in the catalog because NVIDIA's NIM deployment is hung — backend MODEL_REDIRECTS auto-forwards calls to `nvidia/deepseek-v4-flash`. Calls were succeeding but `SmartChatResponse.Model` reported the redirected name. Repointed `TierMedium` → `nvidia/deepseek-v4-flash` so reported model matches the model that actually answered. `TierSimple` keeps `nvidia/gpt-oss-120b` — it was briefly delisted 2026-04-28 then re-enabled 2026-04-30 with `available: true` + `hidden: true` (hidden from `/v1/models` for privacy but direct calls still work, which is fine for the Go SDK because routingTable doesn't consult `/v1/models`).
+- README refresh: DeepSeek section gains a V4 family note explaining the chat/reasoner repricing and the new V4 Pro flagship; routing-table caveat documents the hidden-but-callable status of `gpt-oss` and the auto-redirect chain for `v4-pro` / `v3.2` / `glm-4.7`.
+- **X/Twitter methods deprecated.** BlockRun's `/v1/x/*` (AttentionVC-partnered) integration was removed from the backend on 2026-04-30 (blockrun commit 80dcf52). All `LLMClient.X*` methods (`x_twitter.go`) now carry `// Deprecated:` doc comments so `go vet` and IDEs flag use sites — calls return HTTP 404 until a replacement X data upstream is wired up. Methods stay in the package so existing call sites keep compiling.
+- **DeepSeek V4 thinking + tool-call multi-turn now works.** Backend commit `f8a2d44` (2026-05-03) preserves `reasoning_content` on assistant messages with `tool_calls` for DeepSeek V4 thinking-mode (`deepseek-reasoner` / `deepseek-v4-pro`). `ChatMessage.ReasoningContent` already had `json:"reasoning_content,omitempty"`, so multi-turn DeepSeek with tools now round-trips correctly through `BuildAnthropicTextContent` and the OpenAI-compatible chat path. Server-side fix; this entry exists so users seeing past 5xx-retry-loop failures know they're resolved.
+
 ## 0.4.1
 
 - **Smart router: Eco / Auto `TierSimple` promoted from `moonshot/kimi-k2.5` → `moonshot/kimi-k2.6`** (Moonshot's flagship — 256K context, vision + `reasoning_content`, $0.95 in / $4.00 out per 1M). The catalog now hides `kimi-k2.5` as superseded; routing the SmartChat default at the new flagship keeps the SDK aligned with the canonical catalog. README routing table updated to match.
