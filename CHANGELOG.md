@@ -2,6 +2,10 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.7.0
+
+- **`VoiceClient` — AI-powered outbound phone calls via x402.** New file `voice.go` wraps the backend's `POST /v1/voice/call` (paid, $0.54/call) and `GET /v1/voice/call/{callId}` (free polling). The AI agent dials a US/Canada E.164 number and conducts a real-time conversation following your `Task` instructions; STT + LLM + TTS are handled upstream by Bland.ai. Full pass-through for `From`, `Voice` (7 presets via `VoiceNat`/`VoiceJosh`/`VoiceMaya`/`VoiceJune`/`VoicePaige`/`VoiceDerek`/`VoiceFlorian` + custom Bland IDs), `MaxDuration` (1–30 min), `Language`, `FirstSentence`, `WaitForGreeting`, `InterruptionThreshold`, and `Model` tier (`CallModelBase` / `CallModelEnhanced` / `CallModelTurbo`). Construct with `NewVoiceClient("")` (env-key fallback to `BLOCKRUN_WALLET_KEY` / `BASE_CHAIN_WALLET_KEY`); functional options `WithVoiceAPIURL` / `WithVoiceTimeout` / `WithVoiceHTTPClient`. Status polling returns the full Bland call record including any fields BlockRun adds on the gateway via `CallStatusResponse.Extra`. See README "Voice Calls" section for usage.
+
 ## 0.6.0
 
 - **Predexon v2 endpoints exposed via typed helpers.** All v2 endpoints went live in production on 2026-05-07 (`blockrun-web-00451-cnw`). The generic `PM()` / `PMQuery()` passthrough already routed them, but call sites can now discover the new shape from method names + godoc. Ten new methods on `*LLMClient` — each is a thin wrapper, no breaking changes:

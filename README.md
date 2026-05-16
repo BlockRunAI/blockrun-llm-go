@@ -437,6 +437,29 @@ result, err = videoClient.Generate(ctx, "the subject turns and smiles", &blockru
 
 The client blocks until the video is ready (30-120s typical; Seedance is hard-capped at 85s upstream) because the gateway handles async polling internally.
 
+## Voice Calls
+
+`VoiceClient` wraps `POST /v1/voice/call` (paid, $0.54/call) and `GET /v1/voice/call/{callId}` (free polling) — AI-powered outbound phone calls powered by Bland.ai. The agent dials the recipient and runs a real-time conversation based on your `Task` instructions. US + Canada destinations.
+
+```go
+voiceClient, err := blockrun.NewVoiceClient("")
+
+// Initiate (paid $0.54)
+result, err := voiceClient.Call(ctx, blockrun.CallOptions{
+    To:          "+14155552671",
+    Task:        "You are a friendly assistant calling to confirm a 3pm dentist appointment.",
+    Voice:       blockrun.VoiceMaya, // nat / josh / maya / june / paige / derek / florian
+    MaxDuration: 5,                  // minutes (1–30)
+})
+fmt.Println(result.CallID)
+
+// Poll for transcript + recording (free)
+status, err := voiceClient.GetCallStatus(ctx, result.CallID)
+fmt.Println(status.Status, status.RecordingURL)
+```
+
+Bring your own caller-ID: set `From: "+14155552671"` (must be a BlockRun phone number you own; buy via `/v1/phone/numbers/buy`).
+
 ## Response Caching
 
 Enable local caching to avoid redundant API calls.
