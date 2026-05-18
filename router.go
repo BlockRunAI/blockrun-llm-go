@@ -58,11 +58,27 @@ type SmartChatOptions struct {
 // in /v1/models as superseded; chat completions still serves it for clients
 // pinned to its pricing, but the SmartChat default now points at k2.6.
 //
-// NVIDIA free-tier refresh (2026-04-21) retired nemotron-*, qwen3.5-397b,
-// mistral-large-3-675b, devstral-2-123b, and nvidia/kimi-k2.5 (paid).
+// DeepSeek V4 family (2026-04-24, paid catalog): deepseek/deepseek-chat and
+// deepseek/deepseek-reasoner are now V4 Flash chat / thinking modes
+// ($0.20 in / $0.40 out per 1M, 1M context). deepseek/deepseek-v4-pro is
+// the new flagship paid SKU ($0.50 in / $1.00 out under the 75% promo
+// through 2026-05-31; list $2.00/$4.00).
+//
+// NVIDIA free-tier churn (2026-04-28 → 2026-04-30): nvidia/gpt-oss-120b
+// and nvidia/gpt-oss-20b were briefly delisted over privacy concerns then
+// re-enabled with `available: true` + `hidden: true` — they no longer
+// appear in `/v1/models` but direct calls by full ID still return HTTP 200,
+// which is fine for the Go SDK because routingTable here doesn't consult
+// `/v1/models`. Added nvidia/deepseek-v4-pro and nvidia/deepseek-v4-flash
+// (1M context). v4-pro, v3.2, and glm-4.7 are hidden because NVIDIA's NIM
+// deployment is hung; backend MODEL_REDIRECTS transparently forwards calls
+// to v4-flash / qwen3-coder. TierMedium below is pinned to visible
+// v4-flash so SmartChatResponse.Model reports the model that actually
+// answered (was nvidia/deepseek-v3.2 — silently redirected); TierSimple
+// keeps nvidia/gpt-oss-120b since heavy users rely on it.
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	RoutingFree: {
-		TierSimple: "nvidia/gpt-oss-120b", TierMedium: "nvidia/deepseek-v3.2",
+		TierSimple: "nvidia/gpt-oss-120b", TierMedium: "nvidia/deepseek-v4-flash",
 		TierComplex: "nvidia/qwen3-next-80b-a3b-thinking", TierReasoning: "nvidia/qwen3-next-80b-a3b-thinking",
 	},
 	RoutingEco: {

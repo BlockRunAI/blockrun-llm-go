@@ -62,15 +62,16 @@ fmt.Println(result.Response) // "4"
 
 | Model ID | Context | Best For |
 |----------|---------|----------|
-| `nvidia/deepseek-v4-pro` | 1M | Flagship reasoning — MMLU-Pro 87.5, GPQA 90.1, SWE-bench 80.6, LiveCodeBench 93.5 |
-| `nvidia/deepseek-v4-flash` | 1M | ~5× faster than V4 Pro — chat, summarization, light reasoning (weaker factual recall) |
+| `nvidia/deepseek-v4-flash` | 1M | DeepSeek V4 Flash — 284B / 13B active MoE, ~5× faster than V4 Pro. Best free chat / summarization / light reasoning |
 | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | 256K | Only vision-capable free model — text + images + video (≤2 min) + audio (≤1 hr) |
 | `nvidia/qwen3-next-80b-a3b-thinking` | 131K | 116 tok/s reasoning with thinking mode |
 | `nvidia/mistral-small-4-119b` | 131K | 114 tok/s — fastest free chat |
-| `nvidia/glm-4.7` | 131K | 237 tok/s — GLM-4.7 with thinking mode |
 | `nvidia/llama-4-maverick` | 131K | Meta Llama 4 Maverick MoE |
 | `nvidia/qwen3-coder-480b` | 131K | Coding-optimised 480B MoE |
-| `nvidia/deepseek-v3.2` | 131K | Legacy V3.2 — auto-upgrades to V4 Pro via fallback |
+| `nvidia/gpt-oss-120b` | 128K | OpenAI open-weight 120B — 123 tok/s. Hidden from `/v1/models` for privacy but direct calls by full ID still work |
+| `nvidia/gpt-oss-20b` | 128K | OpenAI open-weight 20B — 155 tok/s. Hidden from `/v1/models` but direct calls still work |
+
+> Need V4-Pro-class reasoning? Use the paid `deepseek/deepseek-v4-pro` ($0.50/$1.00 with the 75% promo through 2026-05-31) — `nvidia/deepseek-v4-pro` is currently hidden because NVIDIA's NIM deployment is hung; backend MODEL_REDIRECTS forwards calls to V4 Flash.
 
 > Note: `nvidia/gpt-oss-120b` and `nvidia/gpt-oss-20b` were retired 2026-04-28 — NVIDIA's free build.nvidia.com tier reserves the right to use prompts/outputs for service improvement, which conflicts with our data-privacy policy.
 
@@ -98,6 +99,9 @@ fmt.Println(result.Response) // "4"
 | **Prediction Markets** | Polymarket, Kalshi data access |
 | **Image Generation** | DALL-E 3, GPT Image 1/2, Nano Banana, Flux, CogView-4, Grok Imagine |
 | **Video Generation** | Grok Imagine Video, ByteDance Seedance (1.5-pro / 2.0-fast / 2.0) |
+| **Voice Calls** | AI-powered outbound phone calls (Bland.ai upstream) |
+| **Phone Lookup + Numbers** | Twilio carrier/fraud lookup + provisioned numbers for caller-ID |
+| **Surf (asksurf.ai)** | ~83 endpoints: exchange data, on-chain SQL, prediction markets, wallet/social analytics |
 | **Response Caching** | Local cache with per-endpoint TTL |
 | **Cost Tracking** | Session spending + persistent JSONL log |
 | **Balance Checking** | Query USDC balance via Base chain RPC |
@@ -219,17 +223,32 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 
 | Profile | Simple | Medium | Complex | Reasoning |
 |---------|--------|--------|---------|-----------|
-| **free** | nvidia/deepseek-v4-flash | nvidia/deepseek-v4-pro | nvidia/qwen3-next-80b-a3b-thinking | nvidia/deepseek-v4-pro |
+| **free** | nvidia/gpt-oss-120b | nvidia/deepseek-v4-flash | nvidia/qwen3-next-80b-a3b-thinking | nvidia/qwen3-next-80b-a3b-thinking |
 | **eco** | moonshot/kimi-k2.6 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
 | **auto** | moonshot/kimi-k2.6 | google/gemini-2.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
 | **premium** | google/gemini-2.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.5 | openai/o3 |
 
-> NVIDIA free tier refreshed 2026-04-28. Added `nvidia/deepseek-v4-pro`,
-> `nvidia/deepseek-v4-flash` (1M context), and `nvidia/nemotron-3-nano-omni`
-> (vision). Retired IDs (`nvidia/gpt-oss-120b`, `nvidia/gpt-oss-20b`,
-> `nvidia/nemotron-*`, `nvidia/mistral-large-3-675b`, `nvidia/devstral-2-123b`,
-> `nvidia/qwen3.5-397b-a17b`, paid `nvidia/kimi-k2.5`) — gpt-oss models pulled
-> over data-privacy concerns; the rest resolve via backend redirects.
+> DeepSeek V4 family launched 2026-04-24. The legacy `deepseek/deepseek-chat`
+> and `deepseek/deepseek-reasoner` IDs (used by **eco** Medium / Reasoning
+> above) are now V4 Flash non-thinking / thinking modes — $0.20 in / $0.40 out
+> per 1M, 1M context. The new paid flagship `deepseek/deepseek-v4-pro`
+> ($0.50/$1.00 with 75% promo through 2026-05-31) is available via direct
+> chat calls; SmartChat keeps `deepseek-reasoner` as the eco/auto reasoning
+> primary because V4 Flash thinking is cheaper.
+>
+> NVIDIA free tier refreshed 2026-04-28: added `nvidia/deepseek-v4-flash`
+> (1M context) and `nvidia/nemotron-3-nano-omni` (vision). `nvidia/gpt-oss-120b`
+> and `nvidia/gpt-oss-20b` were briefly delisted then **re-enabled
+> 2026-04-30** with `available: true` + `hidden: true` — they no longer
+> appear in `/v1/models` (so SmartChat won't auto-pick them) but direct
+> calls by full ID still return HTTP 200. Retired IDs (`nvidia/nemotron-*`,
+> `nvidia/mistral-large-3-675b`, `nvidia/devstral-2-123b`,
+> `nvidia/qwen3.5-397b-a17b`, paid `nvidia/kimi-k2.5`) resolve via backend
+> redirects. `nvidia/deepseek-v4-pro`, `nvidia/deepseek-v3.2`, and
+> `nvidia/glm-4.7` are temporarily hidden (NVIDIA NIM hung) and
+> auto-redirect to `nvidia/deepseek-v4-flash` / `nvidia/qwen3-coder-480b`;
+> the Free routing primaries above point at visible IDs so `result.Model`
+> reflects the model that actually answered.
 
 ## Streaming
 
@@ -458,7 +477,85 @@ status, err := voiceClient.GetCallStatus(ctx, result.CallID)
 fmt.Println(status.Status, status.RecordingURL)
 ```
 
-Bring your own caller-ID: set `From: "+14155552671"` (must be a BlockRun phone number you own; buy via `/v1/phone/numbers/buy`).
+Bring your own caller-ID: set `From: "+14155552671"` (must be a BlockRun phone number you own; buy via `PhoneClient.BuyNumber` — see next section).
+
+If `From` is empty, the backend auto-picks when your wallet owns exactly one active number; returns 403 `no_active_number` (zero owned) or 400 `ambiguous_from` (two or more).
+
+## Phone Lookup + Number Provisioning
+
+`PhoneClient` wraps `/v1/phone/*` for Twilio-backed phone-number lookup (carrier + fraud) and provisioning the caller-ID numbers required by `VoiceClient.Call`.
+
+```go
+phone, err := blockrun.NewPhoneClient("")
+
+// Carrier + line-type ($0.01)
+info, err := phone.Lookup(ctx, "+14155552671")
+fmt.Println(info.Carrier)
+
+// Carrier + SIM-swap / call-forwarding signals ($0.05)
+fraud, err := phone.LookupFraud(ctx, "+14155552671")
+
+// Provision a US number (30-day lease bound to your wallet, $5.00)
+bought, err := phone.BuyNumber(ctx, blockrun.BuyNumberOptions{
+    Country:  "US",
+    AreaCode: "415", // optional 3-digit hint; falls back to any US number
+})
+fmt.Println(bought.PhoneNumber, bought.ExpiresAt)
+
+// List + renew + release
+owned, _ := phone.ListNumbers(ctx)
+fmt.Printf("%d numbers active\n", owned.Count)
+
+_, _ = phone.RenewNumber(ctx, bought.PhoneNumber)   // +30 days, $5.00
+_, _ = phone.ReleaseNumber(ctx, bought.PhoneNumber) // free, returns to pool
+```
+
+| Endpoint | Method | Price |
+|----------|--------|-------|
+| `/v1/phone/lookup` | POST | $0.01 |
+| `/v1/phone/lookup/fraud` | POST | $0.05 |
+| `/v1/phone/numbers/buy` | POST | $5.00 (settled only after Twilio confirms) |
+| `/v1/phone/numbers/renew` | POST | $5.00 |
+| `/v1/phone/numbers/list` | POST | $0.001 |
+| `/v1/phone/numbers/release` | POST | free |
+
+Failed buys never charge your wallet — settlement is held until Twilio confirms the purchase.
+
+## Surf (asksurf.ai)
+
+`SurfClient` wraps `/v1/surf/*` — a single backend partner exposing **~83 crypto-intelligence endpoints** (exchange data, on-chain SQL, prediction markets, wallet/social analytics, project intelligence). Tiered pricing matches the backend:
+
+| Tier | Price | Examples |
+|------|-------|----------|
+| **1** | $0.001 | `market/ranking`, `exchange/price`, `news/feed`, `prediction-market/polymarket/markets` |
+| **2** | $0.005 | `token/holders`, `social/mindshare`, `search/web`, `wallet/detail` |
+| **3** | $0.020 | `onchain/sql`, `onchain/query`, `onchain/schema` |
+
+```go
+surf, err := blockrun.NewSurfClient("")
+
+// Discovery
+for _, e := range blockrun.SurfEndpoints() {
+    fmt.Printf("%-50s %s tier=%d $%.3f\n", e.Path, e.Method, e.Tier, e.PriceUSD)
+}
+price, _ := blockrun.SurfPrice("onchain/sql") // 0.020
+
+// GET — pass query params (any value; converted to strings, []string joined with comma)
+top, err := surf.Get(ctx, "market/ranking", map[string]any{"limit": 20})
+btc, err := surf.Get(ctx, "exchange/price",  map[string]any{"pair": "BTC/USDT"})
+
+// POST — JSON body
+sql, err := surf.Post(ctx, "onchain/sql", map[string]any{
+    "query": "SELECT count() FROM ethereum.blocks",
+})
+
+// Generic helper — auto-routes GET vs POST from the catalog
+out, err := surf.Call(ctx, "token/holders", blockrun.SurfCallOptions{
+    Params: map[string]any{"address": "0x...", "chain": "ethereum"},
+})
+```
+
+Required-param validation runs client-side before the network round trip (e.g. `exchange/price` requires `pair`), so missing params surface as a `*ValidationError` instead of a 400 round-trip.
 
 ## Response Caching
 

@@ -101,7 +101,13 @@ type CallOptions struct {
 	// Task describes what the AI agent should do on the call (10–4000 chars). Required.
 	Task string
 
-	// From is your provisioned BlockRun caller-ID number (E.164). Must be wallet-owned.
+	// From is your provisioned BlockRun caller-ID number (E.164).
+	//
+	// Must be a number your wallet owns (see PhoneClient.BuyNumber). Resolution
+	// rules on the backend if From is empty:
+	//   - exactly one active number owned → that number is used automatically
+	//   - zero active numbers           → 403 "no_active_number"
+	//   - two or more active numbers    → 400 "ambiguous_from" (set From explicitly)
 	From string
 
 	// Voice is a preset name (VoiceNat, …) or any custom Bland.ai voice ID.
