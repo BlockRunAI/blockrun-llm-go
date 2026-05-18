@@ -6,7 +6,17 @@ import (
 	"fmt"
 )
 
+// X/Twitter client methods on LLMClient.
+//
+// Deprecated: BlockRun's /v1/x/* (AttentionVC-partnered) integration was
+// removed from the backend on 2026-04-30 (blockrun commit 80dcf52). All
+// X* methods on LLMClient will return HTTP 404 until a replacement
+// X data upstream is wired up. Methods are kept so existing call sites
+// do not fail to compile.
+
 // XUserLookup looks up multiple X/Twitter users by username.
+//
+// Deprecated: returns HTTP 404 — see x_twitter.go header comment.
 func (c *LLMClient) XUserLookup(ctx context.Context, usernames []string) (*XUserLookupResponse, error) {
 	if len(usernames) == 0 {
 		return nil, &ValidationError{Field: "usernames", Message: "At least one username is required"}

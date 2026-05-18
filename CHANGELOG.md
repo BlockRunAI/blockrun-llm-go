@@ -2,6 +2,26 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.8.0
+
+- **`PhoneClient` — Twilio-backed phone lookup + number provisioning via x402.** New file `phone.go` wraps the backend's `/v1/phone/*` partner endpoints. Methods on `*PhoneClient`:
+  - `Lookup(ctx, phoneNumber)` — carrier + line-type ($0.01)
+  - `LookupFraud(ctx, phoneNumber)` — adds SIM-swap / call-forwarding signals ($0.05)
+  - `BuyNumber(ctx, BuyNumberOptions{Country, AreaCode})` — provision a US/CA number with a 30-day lease bound to your wallet ($5.00). Payment is settled only after Twilio confirms the purchase, so failed buys never charge your wallet.
+  - `RenewNumber(ctx, phoneNumber)` — extend by 30 days ($5.00)
+  - `ListNumbers(ctx)` — list your active numbers ($0.001)
+  - `ReleaseNumber(ctx, phoneNumber)` — return a number to the pool (free, still flows through x402 for wallet-identity verification)
+  Construct with `NewPhoneClient("")` (env-key fallback to `BLOCKRUN_WALLET_KEY` / `BASE_CHAIN_WALLET_KEY`); functional options `WithPhoneAPIURL` / `WithPhoneTimeout` / `WithPhoneHTTPClient`. After buying a number, use it as the `From` caller-ID in `VoiceClient.Call`.
+
+- **`SurfClient` — asksurf.ai crypto-data gateway via x402.** New file `surf.go` wraps `/v1/surf/*` and exposes ~83 endpoints covering exchange data, on-chain SQL, prediction markets (Polymarket + Kalshi), wallet/social analytics, and project intelligence. Tiered pricing matches the backend: tier 1 / 2 / 3 → $0.001 / $0.005 / $0.020. API:
+  - `SurfEndpoints()` — full discovery catalog as `[]SurfEndpoint`
+  - `SurfEndpointInfo(path)` / `SurfPrice(path)` — single-endpoint metadata
+  - `client.Get(ctx, path, params)` / `client.Post(ctx, path, body)` — direct callers; 402-payment handling reuses the existing `doGetWithPayment` / `doRequest` helpers, so paid GETs are signed transparently
+  - `client.Call(ctx, path, SurfCallOptions{Params, Body})` — auto-routes GET vs POST from the catalog
+  Required-param validation runs client-side before the network round trip.
+
+- **`VoiceClient.CallOptions.From` docs reflect new backend resolution rules.** When `From` is omitted, the backend now auto-picks if your wallet owns exactly one active number; returns 403 `no_active_number` (zero owned) or 400 `ambiguous_from` (two or more) otherwise. The SDK already forwarded `From` correctly — only the doc comment was updated.
+
 ## 0.7.0
 
 - **`VoiceClient` — AI-powered outbound phone calls via x402.** New file `voice.go` wraps the backend's `POST /v1/voice/call` (paid, $0.54/call) and `GET /v1/voice/call/{callId}` (free polling). The AI agent dials a US/Canada E.164 number and conducts a real-time conversation following your `Task` instructions; STT + LLM + TTS are handled upstream by Bland.ai. Full pass-through for `From`, `Voice` (7 presets via `VoiceNat`/`VoiceJosh`/`VoiceMaya`/`VoiceJune`/`VoicePaige`/`VoiceDerek`/`VoiceFlorian` + custom Bland IDs), `MaxDuration` (1–30 min), `Language`, `FirstSentence`, `WaitForGreeting`, `InterruptionThreshold`, and `Model` tier (`CallModelBase` / `CallModelEnhanced` / `CallModelTurbo`). Construct with `NewVoiceClient("")` (env-key fallback to `BLOCKRUN_WALLET_KEY` / `BASE_CHAIN_WALLET_KEY`); functional options `WithVoiceAPIURL` / `WithVoiceTimeout` / `WithVoiceHTTPClient`. Status polling returns the full Bland call record including any fields BlockRun adds on the gateway via `CallStatusResponse.Extra`. See README "Voice Calls" section for usage.
