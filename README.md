@@ -418,7 +418,7 @@ result, err := client.PMQuery(ctx, "polymarket/query", map[string]any{
 
 ## Image Generation
 
-Supported models: `openai/dall-e-3`, `openai/gpt-image-1`, `openai/gpt-image-2` (ChatGPT Images 2.0 — reasoning-driven, $0.06–0.12/image), `google/nano-banana`, `google/nano-banana-pro`, `zai/cogview-4`, `black-forest/flux-1.1-pro`, `xai/grok-imagine-image` ($0.02/image), `xai/grok-imagine-image-pro` ($0.07/image). `openai/gpt-image-1` and `openai/gpt-image-2` also support the edit endpoint via `client.Edit()`.
+Supported models: `openai/dall-e-3`, `openai/gpt-image-1`, `openai/gpt-image-2` (ChatGPT Images 2.0 — reasoning-driven, $0.06–0.12/image), `google/nano-banana`, `google/nano-banana-pro`, `zai/cogview-4`, `black-forest/flux-1.1-pro`, `xai/grok-imagine-image` ($0.02/image), `xai/grok-imagine-image-pro` ($0.07/image). Editing and multi-image fusion via `client.Edit()` are supported by `openai/gpt-image-1`, `openai/gpt-image-2`, `google/nano-banana`, and `google/nano-banana-pro`.
 
 ```go
 imageClient, err := blockrun.NewImageClient("")
@@ -431,6 +431,23 @@ fmt.Println(result.Data[0].URL)       // permanent blockrun-hosted URL
 fmt.Println(result.Data[0].SourceURL) // original upstream URL
 fmt.Println(result.Data[0].BackedUp)  // true when gateway mirrored to GCS
 ```
+
+### Editing & fusion
+
+`Edit()` takes one source image for a standard edit, or several to fuse them (up to the provider's limit, typically 4 — Gemini tops out around 3 anchors). Each image must be a base64 data URI (`data:image/...`). The default edit model is `openai/gpt-image-2`.
+
+```go
+// Single-image edit
+result, err := imageClient.Edit(ctx, "make the sky purple",
+    []string{"data:image/png;base64,..."}, nil)
+
+// Multi-image fusion — e.g. drop a brand logo onto a product photo
+result, err = imageClient.Edit(ctx, "place the logo on the shirt",
+    []string{photoDataURI, logoDataURI},
+    &blockrun.ImageEditOptions{Model: "google/nano-banana"})
+```
+
+A `mask` (via `ImageEditOptions.Mask`) is supported by the OpenAI models for inpainting, but cannot be combined with multiple source images.
 
 ## Music Generation
 

@@ -2,6 +2,13 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.10.0
+
+Adds image editing and multi-image fusion to `ImageClient`, closing a gap where the README already advertised `client.Edit()` but the method did not exist.
+
+- **`ImageClient.Edit(ctx, prompt, images, *ImageEditOptions)` — image editing & fusion via x402.** Wraps `POST /v1/images/image2image`. Pass one source image for a standard edit, or up to the provider's limit (typically 4; Gemini ~3 anchors) to fuse them — e.g. a reference photo plus a brand logo. A single image is sent as an OpenAI-compatible string; multiple images are sent as an array. Each image must be a base64 data URI (`data:image/...`).
+  - `ImageEditOptions{ Model, Mask, Size, N }` — default model `openai/gpt-image-2`. Edit-capable models: `openai/gpt-image-1`, `openai/gpt-image-2`, `google/nano-banana`, `google/nano-banana-pro`. `Mask` (OpenAI inpainting) cannot be combined with multiple source images.
+
 ## 0.9.0
 
 Brings the Go SDK to feature parity with the Python SDK's media stack (music + face/character assets) and extends `VideoClient` with the Seedance 2.0 identity-consistency options.
