@@ -98,7 +98,10 @@ fmt.Println(result.Response) // "4"
 | **Web Search** | Search web, X/Twitter, and news |
 | **Prediction Markets** | Polymarket, Kalshi data access |
 | **Image Generation** | DALL-E 3, GPT Image 1/2, Nano Banana, Flux, CogView-4, Grok Imagine |
-| **Video Generation** | Grok Imagine Video, ByteDance Seedance (1.5-pro / 2.0-fast / 2.0) |
+| **Music Generation** | Full-length (~3 min) tracks via MiniMax Music 2.5+ |
+| **Video Generation** | Grok Imagine Video, ByteDance Seedance (1.5-pro / 2.0-fast / 2.0) with face/character consistency |
+| **Virtual Portraits** | Enroll AI-generated characters as reusable Seedance face assets |
+| **RealFace** | Enroll a real person's likeness (on-phone liveness, no KYC) as a Seedance face asset |
 | **Voice Calls** | AI-powered outbound phone calls (Bland.ai upstream) |
 | **Phone Lookup + Numbers** | Twilio carrier/fraud lookup + provisioned numbers for caller-ID |
 | **Surf (asksurf.ai)** | ~83 endpoints: exchange data, on-chain SQL, prediction markets, wallet/social analytics |
@@ -429,6 +432,28 @@ fmt.Println(result.Data[0].SourceURL) // original upstream URL
 fmt.Println(result.Data[0].BackedUp)  // true when gateway mirrored to GCS
 ```
 
+## Music Generation
+
+Generate full-length (~3 minute) tracks via MiniMax Music 2.5+ ($0.1575/track). Generated URLs expire in ~24h — download immediately if you need to keep the track.
+
+```go
+musicClient, err := blockrun.NewMusicClient("")
+
+// Instrumental track (default)
+result, err := musicClient.Generate(ctx, "upbeat synthwave with neon pads", nil)
+fmt.Println(result.Data[0].URL)             // CDN URL — download within ~24h
+fmt.Println(result.Data[0].DurationSeconds)
+
+// Vocal track with custom lyrics
+instrumental := false
+result, err = musicClient.Generate(ctx, "upbeat pop song", &blockrun.MusicGenerateOptions{
+    Instrumental: &instrumental,
+    Lyrics:       "Hello world, this is my song...",
+})
+```
+
+The default timeout is 210s since generation takes 1-3 minutes.
+
 ## Video Generation
 
 Supported models:
@@ -452,9 +477,63 @@ result, err = videoClient.Generate(ctx, "the subject turns and smiles", &blockru
     Model:    "bytedance/seedance-1.5-pro",
     ImageURL: "https://example.com/portrait.jpg",
 })
+
+// Face/character consistency (Seedance 2.0 fast/pro) — reuse the same
+// person or character across multiple videos via a ta_ asset id from
+// PortraitClient or RealFaceClient (see below). Mutually exclusive with ImageURL.
+genAudio := true
+result, err = videoClient.Generate(ctx, "the spokesperson presents the product", &blockrun.VideoGenerateOptions{
+    Model:           "bytedance/seedance-2.0",
+    RealFaceAssetID: "ta_abcdef1234567890",
+    Resolution:      "1080p",       // 360p / 480p / 720p / 1080p / 4K
+    GenerateAudio:   &genAudio,     // *bool — nil defers to model default
+})
 ```
 
 The client blocks until the video is ready (30-120s typical; Seedance is hard-capped at 85s upstream) because the gateway handles async polling internally.
+
+## Virtual Portraits
+
+`PortraitClient` enrolls an AI-generated character image as a reusable face/character asset ($0.01 USDC, one-time, no KYC). The returned `ta_xxxxxxxx` asset id can be passed as `RealFaceAssetID` to `VideoClient.Generate` on Seedance 2.0 / 2.0-fast to keep the same character across multiple videos.
+
+```go
+portraitClient, err := blockrun.NewPortraitClient("")
+
+portrait, err := portraitClient.Enroll(ctx, "My Spokesperson", "https://example.com/character.jpg")
+fmt.Println(portrait.AssetID)            // ta_abcdef1234567890
+fmt.Println(portrait.Settlement.TxHash)  // 0x9f3a…
+
+// List the wallet's enrolled portraits (free)
+list, err := portraitClient.ListPortraits(ctx, "") // "" = own wallet
+for _, p := range list.Portraits {
+    fmt.Println(p.AssetID, p.Name)
+}
+```
+
+## RealFace
+
+`RealFaceClient` enrolls a *real person's* likeness as a face asset ($0.01 USDC, one-time). Unlike a Virtual Portrait, it proves the enroller is the same person via a brief on-phone liveness check (nod + blink, ~1 minute) — **no KYC**. The flow is three steps:
+
+```go
+realfaceClient, err := blockrun.NewRealFaceClient("")
+
+// 1. Start enrollment (free). Render init.H5Link as a QR for the person.
+init, err := realfaceClient.Init(ctx, "Jane — Q3 spokesperson", "")
+fmt.Println(init.H5Link)  // they scan this + do the liveness check
+
+// 2. Wait until they finish the phone liveness check (polls status).
+_, err = realfaceClient.WaitForActive(ctx, init.GroupID, nil)
+
+// 3. Finalize ($0.01 USDC) with the person's face photo.
+rf, err := realfaceClient.Enroll(ctx, "Jane — Q3 spokesperson", "https://example.com/jane.jpg", init.GroupID)
+fmt.Println(rf.AssetID)            // ta_abcdef1234567890 — use as RealFaceAssetID on Seedance
+fmt.Println(rf.Settlement.TxHash)
+
+// List the wallet's enrolled RealFaces (free)
+list, err := realfaceClient.ListRealFaces(ctx, "") // "" = own wallet
+```
+
+Failures don't charge: `Enroll` returns an `APIError` with status 425 (group not active — finish the phone check first), 422 (face didn't match the live capture), or 502 (upstream failure), and no payment is taken.
 
 ## Voice Calls
 

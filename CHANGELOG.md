@@ -2,6 +2,26 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.9.0
+
+Brings the Go SDK to feature parity with the Python SDK's media stack (music + face/character assets) and extends `VideoClient` with the Seedance 2.0 identity-consistency options.
+
+- **`MusicClient` — full-length music generation via x402.** New file `music.go` wraps `POST /v1/audio/generations` (MiniMax Music 2.5+, $0.1575/track, ~3 min). API on `*MusicClient`:
+  - `Generate(ctx, prompt, *MusicGenerateOptions)` — instrumental by default; pass `Instrumental: &false` with `Lyrics` for a vocal track. Returns a `*MusicResponse` of `AudioTrack`s (CDN URLs valid ~24h — download promptly).
+  Construct with `NewMusicClient("")`; options `WithMusicAPIURL` / `WithMusicTimeout` / `WithMusicHTTPClient` (default timeout 210s for the 1-3 min generation).
+
+- **`PortraitClient` — enroll Virtual Portraits (AI-generated characters) via x402.** New file `portrait.go` wraps `POST /v1/portrait/enroll` ($0.01 USDC, one-time, no KYC) and the free `GET /v1/wallet/<addr>/portraits` listing. Methods on `*PortraitClient`:
+  - `Enroll(ctx, name, imageURL)` — register a character image, returns a `ta_xxxxxxxx` asset id. Settles only after the portrait is registered upstream, so a failed enrollment (HTTP 502) doesn't charge.
+  - `ListPortraits(ctx, walletAddress)` — list a wallet's portraits (empty address = own wallet).
+
+- **`RealFaceClient` — enroll a real person's likeness via x402.** New file `realface.go` wraps the three-step flow: `POST /v1/realface/init` (free) → on-phone liveness check → `POST /v1/realface/enroll` ($0.01 USDC, no KYC), plus `GET /v1/realface/status` and the free `GET /v1/wallet/<addr>/realfaces` listing. Methods on `*RealFaceClient`:
+  - `Init(ctx, name, groupID)` — start (or refresh) enrollment; returns a `group_id` + `h5_link` the person scans on their phone.
+  - `Status(ctx, groupID)` / `WaitForActive(ctx, groupID, *WaitForActiveOptions)` — poll until the liveness check completes.
+  - `Enroll(ctx, name, imageURL, groupID)` — finalize, returns a `ta_xxxxxxxx` asset id. Failures (425 not-active / 422 face-mismatch / 502 upstream) don't charge.
+  - `ListRealFaces(ctx, walletAddress)` — list a wallet's RealFaces.
+
+- **`VideoClient` — Seedance 2.0 identity consistency.** `VideoGenerateOptions` gains `RealFaceAssetID` (a `ta_` Virtual Portrait or RealFace asset, Seedance 2.0 fast/pro only — mutually exclusive with `ImageURL`), `Resolution` (`360p`/`480p`/`720p`/`1080p`/`4K`), and `GenerateAudio *bool` (nil defers to the model default). Passing both `ImageURL` and `RealFaceAssetID`, or a `RealFaceAssetID` without the `ta_` prefix, now returns a `ValidationError`.
+
 ## 0.8.0
 
 - **`PhoneClient` — Twilio-backed phone lookup + number provisioning via x402.** New file `phone.go` wraps the backend's `/v1/phone/*` partner endpoints. Methods on `*PhoneClient`:

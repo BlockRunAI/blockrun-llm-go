@@ -32,6 +32,15 @@ const (
 // async polling internally. Supports xAI Grok Imagine Video and
 // ByteDance Seedance (1.5-pro / 2.0-fast / 2.0).
 //
+// Seedance 2.0 fast/pro additionally accept a RealFaceAssetID — a
+// "ta_xxxxxx" face/character asset for identity consistency across
+// multiple videos. The asset can be either a Virtual Portrait
+// (AI-generated character, enroll via PortraitClient) or a RealFace
+// (a real person's likeness, enroll via RealFaceClient). Both flows
+// return the same "ta_" id and cost $0.01 USDC. seedance-1.5-pro does
+// NOT support these assets, and RealFaceAssetID is mutually exclusive
+// with ImageURL.
+//
 // SECURITY: Your private key is used ONLY for local EIP-712 signing.
 // The key NEVER leaves your machine - only signatures are transmitted.
 type VideoClient struct {
@@ -88,9 +97,23 @@ type VideoGenerateOptions struct {
 	// Model is the video model ID (default: "xai/grok-imagine-video").
 	Model string `json:"model,omitempty"`
 	// ImageURL is an optional seed image URL for image-to-video.
+	// Mutually exclusive with RealFaceAssetID.
 	ImageURL string `json:"image_url,omitempty"`
+	// RealFaceAssetID is a "ta_xxxxxx" face/character asset for identity
+	// consistency — either a Virtual Portrait (via PortraitClient) or a
+	// RealFace (via RealFaceClient). Seedance 2.0 fast/pro only. Mutually
+	// exclusive with ImageURL.
+	RealFaceAssetID string `json:"real_face_asset_id,omitempty"`
 	// DurationSeconds is the duration to bill for (defaults to model's default duration).
 	DurationSeconds int `json:"duration_seconds,omitempty"`
+	// Resolution overrides the output resolution — "360p" / "480p" / "720p" /
+	// "1080p" / "4K". Seedance defaults to "720p"; Grok ignores it.
+	Resolution string `json:"resolution,omitempty"`
+	// GenerateAudio toggles synced audio in the output. Seedance defaults to
+	// true for text-to-video and false for image- or face-conditioned
+	// generation; Grok ignores it. Use a pointer so the field can be left
+	// unset (nil) to defer to the model default.
+	GenerateAudio *bool `json:"generate_audio,omitempty"`
 }
 
 // VideoClip represents a single generated video clip.
@@ -118,18 +141,18 @@ type VideoResponse struct {
 
 // VideoModel represents an available video model from the API.
 type VideoModel struct {
-	ID                      string  `json:"id"`
-	Name                    string  `json:"name"`
-	Provider                string  `json:"provider"`
-	Description             string  `json:"description"`
-	PricePerSecond          float64 `json:"pricePerSecond"`
-	DefaultDurationSeconds  int     `json:"defaultDurationSeconds"`
-	MaxDurationSeconds      int     `json:"maxDurationSeconds"`
-	SupportsImageInput      bool    `json:"supportsImageInput"`
-	Available               bool    `json:"available"`
+	ID                     string  `json:"id"`
+	Name                   string  `json:"name"`
+	Provider               string  `json:"provider"`
+	Description            string  `json:"description"`
+	PricePerSecond         float64 `json:"pricePerSecond"`
+	DefaultDurationSeconds int     `json:"defaultDurationSeconds"`
+	MaxDurationSeconds     int     `json:"maxDurationSeconds"`
+	SupportsImageInput     bool    `json:"supportsImageInput"`
+	Available              bool    `json:"available"`
 }
 
-// Generate generates a video clip from a text prompt (or text + image).
+// Generate generates a video clip from a text prompt (or text + image / face asset).
 //
 // Blocks until the video is ready (30-120s typical).
 func (c *VideoClient) Generate(ctx context.Context, prompt string, opts *VideoGenerateOptions) (*VideoResponse, error) {
@@ -139,14 +162,35 @@ func (c *VideoClient) Generate(ctx context.Context, prompt string, opts *VideoGe
 	}
 
 	if opts != nil {
+		if opts.ImageURL != "" && opts.RealFaceAssetID != "" {
+			return nil, &ValidationError{
+				Field:   "RealFaceAssetID",
+				Message: "ImageURL and RealFaceAssetID are mutually exclusive; pass at most one",
+			}
+		}
+		if opts.RealFaceAssetID != "" && !strings.HasPrefix(opts.RealFaceAssetID, "ta_") {
+			return nil, &ValidationError{
+				Field:   "RealFaceAssetID",
+				Message: "RealFaceAssetID must start with 'ta_' (a Virtual Portrait or RealFace asset id, e.g. 'ta_abc123xyz' — enroll via PortraitClient or RealFaceClient)",
+			}
+		}
 		if opts.Model != "" {
 			body["model"] = opts.Model
 		}
 		if opts.ImageURL != "" {
 			body["image_url"] = opts.ImageURL
 		}
+		if opts.RealFaceAssetID != "" {
+			body["real_face_asset_id"] = opts.RealFaceAssetID
+		}
 		if opts.DurationSeconds > 0 {
 			body["duration_seconds"] = opts.DurationSeconds
+		}
+		if opts.Resolution != "" {
+			body["resolution"] = opts.Resolution
+		}
+		if opts.GenerateAudio != nil {
+			body["generate_audio"] = *opts.GenerateAudio
 		}
 	}
 
