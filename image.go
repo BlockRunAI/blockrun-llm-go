@@ -96,7 +96,7 @@ type ImageGenerateOptions struct {
 
 // ImageData represents a single generated image.
 type ImageData struct {
-	URL           string `json:"url"`
+	URL string `json:"url"`
 	// SourceURL is the original upstream URL (e.g. imgen.x.ai). Omitted for data URIs.
 	SourceURL string `json:"source_url,omitempty"`
 	// BackedUp is true when the gateway mirrored the image to its GCS bucket.
@@ -150,6 +150,85 @@ func (c *ImageClient) Generate(ctx context.Context, prompt string, opts *ImageGe
 
 	// Make request with payment handling
 	respBytes, err := c.doRequest(ctx, "/v1/images/generations", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var imageResp ImageResponse
+	if err := json.Unmarshal(respBytes, &imageResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &imageResp, nil
+}
+
+// DefaultImageEditModel is the default model for image editing / fusion.
+const DefaultImageEditModel = "openai/gpt-image-2"
+
+// ImageEditOptions contains optional parameters for image editing.
+type ImageEditOptions struct {
+	// Model is the edit-capable model ID. Defaults to DefaultImageEditModel.
+	// Edit-supported: openai/gpt-image-1, openai/gpt-image-2,
+	// google/nano-banana, google/nano-banana-pro.
+	Model string `json:"model,omitempty"`
+	// Mask is an optional base64 data URI marking the region to edit.
+	// Cannot be combined with multiple source images.
+	Mask string `json:"mask,omitempty"`
+	Size string `json:"size,omitempty"`
+	N    int    `json:"n,omitempty"`
+}
+
+// Edit edits or fuses images using img2img.
+//
+// Pass one source image for a standard edit, or multiple (up to the
+// provider's limit, typically 4) to fuse them — e.g. a reference photo
+// plus a brand logo. Each image must be a base64 data URI (data:image/...).
+//
+// Example (single):
+//
+//	resp, err := client.Edit(ctx, "make the sky purple",
+//		[]string{"data:image/png;base64,..."}, nil)
+//
+// Example (fusion):
+//
+//	resp, err := client.Edit(ctx, "place the logo on the shirt",
+//		[]string{photo, logo}, &blockrun.ImageEditOptions{Model: "google/nano-banana"})
+func (c *ImageClient) Edit(ctx context.Context, prompt string, images []string, opts *ImageEditOptions) (*ImageResponse, error) {
+	if len(images) == 0 {
+		return nil, fmt.Errorf("at least one source image is required")
+	}
+
+	body := map[string]any{
+		"prompt": prompt,
+		"model":  DefaultImageEditModel,
+		"size":   DefaultImageSize,
+		"n":      1,
+	}
+
+	// Single image is sent as a string (OpenAI-compatible); multiple images
+	// are sent as an array for fusion. The gateway accepts both.
+	if len(images) == 1 {
+		body["image"] = images[0]
+	} else {
+		body["image"] = images
+	}
+
+	if opts != nil {
+		if opts.Model != "" {
+			body["model"] = opts.Model
+		}
+		if opts.Size != "" {
+			body["size"] = opts.Size
+		}
+		if opts.N > 0 {
+			body["n"] = opts.N
+		}
+		if opts.Mask != "" {
+			body["mask"] = opts.Mask
+		}
+	}
+
+	respBytes, err := c.doRequest(ctx, "/v1/images/image2image", body)
 	if err != nil {
 		return nil, err
 	}
