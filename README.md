@@ -228,8 +228,8 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 |---------|--------|--------|---------|-----------|
 | **free** | nvidia/gpt-oss-120b | nvidia/deepseek-v4-flash | nvidia/qwen3-next-80b-a3b-thinking | nvidia/qwen3-next-80b-a3b-thinking |
 | **eco** | moonshot/kimi-k2.6 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
-| **auto** | moonshot/kimi-k2.6 | google/gemini-2.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
-| **premium** | google/gemini-2.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.5 | openai/o3 |
+| **auto** | moonshot/kimi-k2.6 | google/gemini-3.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
+| **premium** | google/gemini-3.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.5 | openai/o3 |
 
 > DeepSeek V4 family launched 2026-04-24. The legacy `deepseek/deepseek-chat`
 > and `deepseek/deepseek-reasoner` IDs (used by **eco** Medium / Reasoning
@@ -717,7 +717,7 @@ for _, w := range wallets {
 |----------|--------|-----------|------------|
 | **OpenAI** | GPT-5.5, GPT-5.4, GPT-5.2, GPT-5.2 Codex, GPT-5 Mini, GPT-4o, GPT-4o-mini | $0.05–$30.00 | $0.40–$180.00 |
 | **Anthropic** | Claude Opus 4.6, Claude Sonnet 4.6, Claude Haiku 4.5 | $1.00–$5.00 | $5.00–$25.00 |
-| **Google** | Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash | $0.10–$2.00 | $0.40–$12.00 |
+| **Google** | Gemini 3.5 Flash (thinking), Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash | $0.10–$2.00 | $0.40–$12.00 |
 | **xAI** | Grok 4.1 Fast, Grok 3, Grok Code Fast 1 | $0.20–$3.00 | $0.50–$15.00 |
 | **DeepSeek** | DeepSeek Chat, DeepSeek Reasoner | $0.28 | $0.42 |
 | **Moonshot** | Kimi K2.6 (256K, vision + reasoning) | $0.95 | $4.00 |

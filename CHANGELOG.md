@@ -2,6 +2,12 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.10.1
+
+Adopts Google's latest-generation Flash model in SmartChat routing.
+
+- **`google/gemini-3.5-flash` is now the default Flash model in the routing table.** Gemini 3.5 Flash (built-in thinking mode, $0.50 in / $3.00 out, 1M context) supersedes `google/gemini-2.5-flash` and is now used by the **auto** Medium and **premium** Simple tiers. `gemini-2.5-flash` remains available for clients pinned to its pricing.
+
 ## 0.10.0
 
 Adds image editing and multi-image fusion to `ImageClient`, closing a gap where the README already advertised `client.Edit()` but the method did not exist.
