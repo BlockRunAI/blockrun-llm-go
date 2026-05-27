@@ -76,6 +76,12 @@ type SmartChatOptions struct {
 // v4-flash so SmartChatResponse.Model reports the model that actually
 // answered (was nvidia/deepseek-v3.2 — silently redirected); TierSimple
 // keeps nvidia/gpt-oss-120b since heavy users rely on it.
+//
+// Gemini 3.5 Flash promotion (2026-05-27): google/gemini-3.5-flash is the
+// latest-generation Flash with built-in thinking mode ($0.50 in / $3.00 out,
+// 1M context) and supersedes google/gemini-2.5-flash as the go-to Flash SKU.
+// auto/MEDIUM and premium/SIMPLE now point at it; 2.5-flash remains available
+// for clients pinned to its pricing.
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	RoutingFree: {
 		TierSimple: "nvidia/gpt-oss-120b", TierMedium: "nvidia/deepseek-v4-flash",
@@ -86,11 +92,11 @@ var routingTable = map[RoutingProfile]map[RoutingTier]string{
 		TierComplex: "google/gemini-2.5-pro", TierReasoning: "deepseek/deepseek-reasoner",
 	},
 	RoutingAuto: {
-		TierSimple: "moonshot/kimi-k2.6", TierMedium: "google/gemini-2.5-flash",
+		TierSimple: "moonshot/kimi-k2.6", TierMedium: "google/gemini-3.5-flash",
 		TierComplex: "google/gemini-3.1-pro", TierReasoning: "deepseek/deepseek-reasoner",
 	},
 	RoutingPremium: {
-		TierSimple: "google/gemini-2.5-flash", TierMedium: "openai/gpt-5.5",
+		TierSimple: "google/gemini-3.5-flash", TierMedium: "openai/gpt-5.5",
 		TierComplex: "anthropic/claude-opus-4.5", TierReasoning: "openai/o3",
 	},
 }
