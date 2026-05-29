@@ -82,6 +82,11 @@ type SmartChatOptions struct {
 // 1M context) and supersedes google/gemini-2.5-flash as the go-to Flash SKU.
 // auto/MEDIUM and premium/SIMPLE now point at it; 2.5-flash remains available
 // for clients pinned to its pricing.
+//
+// Claude Opus 4.8 promotion (2026-05-29): anthropic/claude-opus-4.8 is now the
+// premium/COMPLEX flagship, replacing anthropic/claude-opus-4.5. Opus 4.8 is
+// Anthropic's most capable model with a 1M-token context window. Older Opus
+// IDs remain available for clients pinned to their pricing.
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	RoutingFree: {
 		TierSimple: "nvidia/gpt-oss-120b", TierMedium: "nvidia/deepseek-v4-flash",
@@ -97,7 +102,7 @@ var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	},
 	RoutingPremium: {
 		TierSimple: "google/gemini-3.5-flash", TierMedium: "openai/gpt-5.5",
-		TierComplex: "anthropic/claude-opus-4.5", TierReasoning: "openai/o3",
+		TierComplex: "anthropic/claude-opus-4.8", TierReasoning: "openai/o3",
 	},
 }
 
