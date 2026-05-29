@@ -2,6 +2,12 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.10.2
+
+Promotes Anthropic's latest flagship in SmartChat routing.
+
+- **`anthropic/claude-opus-4.8` is now the default `premium` Complex model**, replacing `anthropic/claude-opus-4.5`. Opus 4.8 is Anthropic's most capable model with a 1M-token context window. Older Opus IDs remain available for clients pinned to their pricing.
+
 ## 0.10.1
 
 Adopts Google's latest-generation Flash model in SmartChat routing.
