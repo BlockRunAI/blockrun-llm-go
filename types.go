@@ -39,7 +39,9 @@ type ChatCompletionOptions struct {
 	Search           bool              `json:"-"` // Enable xAI Live Search (shortcut)
 	SearchParameters *SearchParameters `json:"search_parameters,omitempty"`
 	Tools            []Tool            `json:"tools,omitempty"`
-	ToolChoice       any               `json:"tool_choice,omitempty"` // string ("none","auto","required") or object
+	ToolChoice       any               `json:"tool_choice,omitempty"`     // string ("none","auto","required") or object
+	ResponseFormat   any               `json:"response_format,omitempty"` // e.g. map[string]string{"type": "json_object"} for JSON mode
+	Stop             any               `json:"stop,omitempty"`            // string or []string — up to 4 stop sequences
 }
 
 // SearchParameters contains xAI Live Search configuration.
@@ -140,19 +142,19 @@ type ModelPricing struct {
 // the new fields (Pricing.Input, ContextWindow) or the legacy aliases
 // (InputPrice, ContextLimit) — they are kept in sync during unmarshalling.
 type Model struct {
-	ID          string   `json:"id"`
-	Object      string   `json:"object,omitempty"`
-	Created     int64    `json:"created,omitempty"`
-	Name        string   `json:"name,omitempty"`
-	Description string   `json:"description,omitempty"`
+	ID          string `json:"id"`
+	Object      string `json:"object,omitempty"`
+	Created     int64  `json:"created,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
 	// Provider is populated from either "owned_by" (real API) or "provider"
 	// (legacy mock). Tag stays "owned_by" so Marshal emits the canonical key.
-	Provider       string       `json:"owned_by,omitempty"`
-	ContextWindow  int          `json:"context_window,omitempty"`
-	MaxOutput      int          `json:"max_output,omitempty"`
-	Categories     []string     `json:"categories,omitempty"`
-	BillingMode    string       `json:"billing_mode,omitempty"`
-	Pricing        ModelPricing `json:"pricing,omitempty"`
+	Provider      string       `json:"owned_by,omitempty"`
+	ContextWindow int          `json:"context_window,omitempty"`
+	MaxOutput     int          `json:"max_output,omitempty"`
+	Categories    []string     `json:"categories,omitempty"`
+	BillingMode   string       `json:"billing_mode,omitempty"`
+	Pricing       ModelPricing `json:"pricing,omitempty"`
 	// Legacy flat fields — populated from Pricing / ContextWindow for
 	// backward compatibility with callers written against the old struct.
 	// They carry `json:"-"` so Marshal doesn't emit duplicate keys.
@@ -175,24 +177,24 @@ type Model struct {
 // canonical nested fields.
 func (m *Model) UnmarshalJSON(data []byte) error {
 	type raw struct {
-		ID            string          `json:"id"`
-		Object        string          `json:"object,omitempty"`
-		Created       int64           `json:"created,omitempty"`
-		Name          string          `json:"name,omitempty"`
-		Description   string          `json:"description,omitempty"`
-		OwnedBy       string          `json:"owned_by,omitempty"`
-		Provider      string          `json:"provider,omitempty"` // legacy
-		ContextWindow int             `json:"context_window,omitempty"`
-		ContextLimit  int             `json:"contextLimit,omitempty"` // legacy
-		MaxOutput     int             `json:"max_output,omitempty"`
-		Categories    []string        `json:"categories,omitempty"`
-		BillingMode   string          `json:"billing_mode,omitempty"`
-		Pricing       *ModelPricing   `json:"pricing,omitempty"`
-		InputPrice    float64         `json:"inputPrice,omitempty"`  // legacy
-		OutputPrice   float64         `json:"outputPrice,omitempty"` // legacy
-		FlatPrice     float64         `json:"flat_price,omitempty"`  // legacy
-		Type          string          `json:"type,omitempty"`
-		Hidden        bool            `json:"hidden,omitempty"`
+		ID            string        `json:"id"`
+		Object        string        `json:"object,omitempty"`
+		Created       int64         `json:"created,omitempty"`
+		Name          string        `json:"name,omitempty"`
+		Description   string        `json:"description,omitempty"`
+		OwnedBy       string        `json:"owned_by,omitempty"`
+		Provider      string        `json:"provider,omitempty"` // legacy
+		ContextWindow int           `json:"context_window,omitempty"`
+		ContextLimit  int           `json:"contextLimit,omitempty"` // legacy
+		MaxOutput     int           `json:"max_output,omitempty"`
+		Categories    []string      `json:"categories,omitempty"`
+		BillingMode   string        `json:"billing_mode,omitempty"`
+		Pricing       *ModelPricing `json:"pricing,omitempty"`
+		InputPrice    float64       `json:"inputPrice,omitempty"`  // legacy
+		OutputPrice   float64       `json:"outputPrice,omitempty"` // legacy
+		FlatPrice     float64       `json:"flat_price,omitempty"`  // legacy
+		Type          string        `json:"type,omitempty"`
+		Hidden        bool          `json:"hidden,omitempty"`
 	}
 	var r raw
 	if err := jsonUnmarshal(data, &r); err != nil {
@@ -243,25 +245,25 @@ func (m *Model) UnmarshalJSON(data []byte) error {
 // AllModel represents a model from either LLM or image generation.
 // Used by ListAllModels() to return a unified list.
 type AllModel struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Provider      string   `json:"provider"`
-	Type          string   `json:"type"` // "llm" or "image"
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	Type     string `json:"type"` // "llm" or "image"
 	// LLM-specific fields
-	InputPrice    float64  `json:"inputPrice,omitempty"`
-	OutputPrice   float64  `json:"outputPrice,omitempty"`
-	ContextLimit  int      `json:"contextLimit,omitempty"`
+	InputPrice   float64 `json:"inputPrice,omitempty"`
+	OutputPrice  float64 `json:"outputPrice,omitempty"`
+	ContextLimit int     `json:"contextLimit,omitempty"`
 	// Image-specific fields
-	PricePerImage float64  `json:"pricePerImage,omitempty"`
+	PricePerImage  float64  `json:"pricePerImage,omitempty"`
 	SupportedSizes []string `json:"supportedSizes,omitempty"`
 }
 
 // PaymentRequirement represents the x402 payment requirements from a 402 response.
 type PaymentRequirement struct {
-	X402Version int                `json:"x402Version"`
-	Accepts     []PaymentOption    `json:"accepts"`
-	Resource    ResourceInfo       `json:"resource"`
-	Extensions  map[string]any     `json:"extensions,omitempty"`
+	X402Version int             `json:"x402Version"`
+	Accepts     []PaymentOption `json:"accepts"`
+	Resource    ResourceInfo    `json:"resource"`
+	Extensions  map[string]any  `json:"extensions,omitempty"`
 }
 
 // PaymentOption represents a single payment option.
@@ -293,8 +295,8 @@ type PaymentPayload struct {
 
 // PaymentData contains the signature and authorization data.
 type PaymentData struct {
-	Signature     string                 `json:"signature"`
-	Authorization TransferAuthorization  `json:"authorization"`
+	Signature     string                `json:"signature"`
+	Authorization TransferAuthorization `json:"authorization"`
 }
 
 // TransferAuthorization contains the EIP-3009 TransferWithAuthorization parameters.

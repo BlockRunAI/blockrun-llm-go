@@ -133,6 +133,13 @@ func (c *LLMClient) ChatCompletionStream(ctx context.Context, model string, mess
 		if opts.ToolChoice != nil {
 			body["tool_choice"] = opts.ToolChoice
 		}
+		// OpenAI-compatible response shaping (honored by the gateway across providers)
+		if opts.ResponseFormat != nil {
+			body["response_format"] = opts.ResponseFormat
+		}
+		if opts.Stop != nil {
+			body["stop"] = opts.Stop
+		}
 	}
 	body["max_tokens"] = maxTokens
 

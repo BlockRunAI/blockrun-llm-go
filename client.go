@@ -167,6 +167,13 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, model string, messages [
 		if opts.ToolChoice != nil {
 			body["tool_choice"] = opts.ToolChoice
 		}
+		// OpenAI-compatible response shaping (honored by the gateway across providers)
+		if opts.ResponseFormat != nil {
+			body["response_format"] = opts.ResponseFormat
+		}
+		if opts.Stop != nil {
+			body["stop"] = opts.Stop
+		}
 	}
 	body["max_tokens"] = maxTokens
 
@@ -254,12 +261,12 @@ func (c *LLMClient) ListAllModels(ctx context.Context) ([]AllModel, error) {
 
 	for _, m := range imageModels {
 		allModels = append(allModels, AllModel{
-			ID:              m.ID,
-			Name:            m.Name,
-			Provider:        m.Provider,
-			Type:            "image",
-			PricePerImage:   m.PricePerImage,
-			SupportedSizes:  m.SupportedSizes,
+			ID:             m.ID,
+			Name:           m.Name,
+			Provider:       m.Provider,
+			Type:           "image",
+			PricePerImage:  m.PricePerImage,
+			SupportedSizes: m.SupportedSizes,
 		})
 	}
 

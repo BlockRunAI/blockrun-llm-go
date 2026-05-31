@@ -2,6 +2,12 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.11.0
+
+Adds OpenAI-compatible JSON mode and stop sequences to chat.
+
+- **`ResponseFormat` and `Stop` on `ChatCompletionOptions`.** The gateway now honors both OpenAI params on `/v1/chat/completions` — natively for OpenAI/Azure, and emulated for Anthropic/Bedrock (a raw-JSON system instruction with code-fence stripping for `{"type": "json_object"}`; `Stop` mapped to `stop_sequences`). Wired into both `ChatCompletion` and `ChatCompletionStream`. Example: `&blockrun.ChatCompletionOptions{ResponseFormat: map[string]string{"type": "json_object"}, Stop: []string{"END"}}`.
+
 ## 0.10.2
 
 Promotes Anthropic's latest flagship in SmartChat routing.
