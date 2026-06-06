@@ -2,6 +2,17 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.12.0
+
+Adds BlockRun Voice (ElevenLabs TTS + sound effects) and syncs the model catalog with the 2026-06-04/05 backend changes.
+
+- **`SpeechClient` — text-to-speech & sound effects via x402.** New file `speech.go` wraps `POST /v1/audio/speech` (OpenAI-compatible TTS), `POST /v1/audio/sound-effects`, and the free `GET /v1/audio/voices`. API on `*SpeechClient`:
+  - `Generate(ctx, input, *SpeechGenerateOptions)` — TTS. Models: `elevenlabs/flash-v2.5` (default, $0.05/1k chars, ~75ms), `elevenlabs/turbo-v2.5` ($0.05/1k), `elevenlabs/multilingual-v2` ($0.10/1k), `elevenlabs/v3` ($0.10/1k). Options: `Voice` (aliases sarah/george/laura/charlie/river/roger/callum/harry or raw ElevenLabs voice_ids), `ResponseFormat` (mp3/opus/pcm/wav), `Speed` (0.7–1.2). Price = `(chars / 1000) × model rate`, minimum $0.001/request.
+  - `SoundEffect(ctx, text, *SoundEffectOptions)` — cinematic sound effects up to 22s, flat $0.05/generation (`elevenlabs/sound-effects`). Options: `DurationSeconds` (0.5–22), `PromptInfluence` (0–1), `ResponseFormat`.
+  - `ListVoices(ctx)` — free voice discovery (rate-limited 60 req/min/IP); returns `[]VoiceInfo`.
+  Construct with `NewSpeechClient("")`; options `WithSpeechAPIURL` / `WithSpeechTimeout` / `WithSpeechHTTPClient` (default timeout 120s — synthesis is synchronous).
+- **Catalog sync (README + router comments):** added `xai/grok-4.3` ($1.50/$4.00, 1M context, reasoning + vision) and `xai/grok-build-0.1` ($1.50/$3.00, 256K, agentic coding) — resold via BlockRun's OpenRouter credit pool; older Grok chat SKUs are now hidden from `/v1/models`. `zai/glm-5.1`'s launch promo ended 2026-06-05 (now per-token $1.40/$4.40; glm-5/glm-5-turbo remain flat $0.001/call). `deepseek/deepseek-v4-pro` pricing corrected to $0.435/$0.87 — the 75% launch promo became the permanent list price after 2026-05-31.
+
 ## 0.11.0
 
 Adds OpenAI-compatible JSON mode and stop sequences to chat.
