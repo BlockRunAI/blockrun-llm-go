@@ -61,8 +61,8 @@ type SmartChatOptions struct {
 // DeepSeek V4 family (2026-04-24, paid catalog): deepseek/deepseek-chat and
 // deepseek/deepseek-reasoner are now V4 Flash chat / thinking modes
 // ($0.20 in / $0.40 out per 1M, 1M context). deepseek/deepseek-v4-pro is
-// the new flagship paid SKU ($0.50 in / $1.00 out under the 75% promo
-// through 2026-05-31; list $2.00/$4.00).
+// the flagship paid SKU ($0.435 in / $0.87 out — the 75% launch promo
+// became DeepSeek's permanent list price after 2026-05-31).
 //
 // NVIDIA free-tier churn (2026-04-28 → 2026-04-30): nvidia/gpt-oss-120b
 // and nvidia/gpt-oss-20b were briefly delisted over privacy concerns then

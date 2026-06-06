@@ -99,6 +99,7 @@ fmt.Println(result.Response) // "4"
 | **Prediction Markets** | Polymarket, Kalshi data access |
 | **Image Generation** | DALL-E 3, GPT Image 1/2, Nano Banana, Flux, CogView-4, Grok Imagine |
 | **Music Generation** | Full-length (~3 min) tracks via MiniMax Music 2.5+ |
+| **Text-to-Speech** | BlockRun Voice (ElevenLabs) — TTS from $0.05/1k chars + sound effects |
 | **Video Generation** | Grok Imagine Video, ByteDance Seedance (1.5-pro / 2.0-fast / 2.0) with face/character consistency |
 | **Virtual Portraits** | Enroll AI-generated characters as reusable Seedance face assets |
 | **RealFace** | Enroll a real person's likeness (on-phone liveness, no KYC) as a Seedance face asset |
@@ -234,10 +235,11 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 > DeepSeek V4 family launched 2026-04-24. The legacy `deepseek/deepseek-chat`
 > and `deepseek/deepseek-reasoner` IDs (used by **eco** Medium / Reasoning
 > above) are now V4 Flash non-thinking / thinking modes — $0.20 in / $0.40 out
-> per 1M, 1M context. The new paid flagship `deepseek/deepseek-v4-pro`
-> ($0.50/$1.00 with 75% promo through 2026-05-31) is available via direct
-> chat calls; SmartChat keeps `deepseek-reasoner` as the eco/auto reasoning
-> primary because V4 Flash thinking is cheaper.
+> per 1M, 1M context. The paid flagship `deepseek/deepseek-v4-pro`
+> ($0.435/$0.87 — the 75% launch promo became the permanent list price after
+> 2026-05-31) is available via direct chat calls; SmartChat keeps
+> `deepseek-reasoner` as the eco/auto reasoning primary because V4 Flash
+> thinking is cheaper.
 >
 > NVIDIA free tier refreshed 2026-04-28: added `nvidia/deepseek-v4-flash`
 > (1M context) and `nvidia/nemotron-3-nano-omni` (vision). `nvidia/gpt-oss-120b`
@@ -470,6 +472,45 @@ result, err = musicClient.Generate(ctx, "upbeat pop song", &blockrun.MusicGenera
 ```
 
 The default timeout is 210s since generation takes 1-3 minutes.
+
+## Text-to-Speech & Sound Effects
+
+BlockRun Voice (ElevenLabs) — OpenAI-compatible TTS plus cinematic sound
+effects. TTS price scales with character count: `(chars / 1000) × model rate`,
+minimum $0.001/request. Synthesis is synchronous (<1s for Flash).
+
+| Model | Price | Max Input | Notes |
+|-------|-------|-----------|-------|
+| `elevenlabs/flash-v2.5` | $0.05/1k chars | 40k chars | ~75ms latency, 32 languages (default) |
+| `elevenlabs/turbo-v2.5` | $0.05/1k chars | 40k chars | ~250ms latency, balanced quality |
+| `elevenlabs/multilingual-v2` | $0.10/1k chars | 10k chars | Long-form narration, audiobooks |
+| `elevenlabs/v3` | $0.10/1k chars | 5k chars | Max expressiveness, 70+ languages |
+| `elevenlabs/sound-effects` | $0.05/generation | 1k chars | Sound effects up to 22s |
+
+```go
+speechClient, err := blockrun.NewSpeechClient("")
+
+// Text-to-speech (voice aliases: sarah, george, laura, charlie,
+// river, roger, callum, harry — or any raw ElevenLabs voice_id)
+result, err := speechClient.Generate(ctx, "Welcome to BlockRun.", &blockrun.SpeechGenerateOptions{
+    Voice: "george",
+})
+fmt.Println(result.Data[0].URL)  // audio URL (mp3 by default)
+
+// Other formats / speed
+speed := 1.1
+result, err = speechClient.Generate(ctx, "Breaking news from the world of micropayments.", &blockrun.SpeechGenerateOptions{
+    Model:          "elevenlabs/v3",
+    ResponseFormat: "wav",
+    Speed:          &speed,
+})
+
+// Sound effects (flat $0.05/generation)
+fx, err := speechClient.SoundEffect(ctx, "rain on a tin roof, distant thunder", nil)
+
+// List voices (free, rate-limited)
+voices, err := speechClient.ListVoices(ctx)
+```
 
 ## Video Generation
 
@@ -718,8 +759,10 @@ for _, w := range wallets {
 | **OpenAI** | GPT-5.5, GPT-5.4, GPT-5.2, GPT-5.2 Codex, GPT-5 Mini, GPT-4o, GPT-4o-mini | $0.05–$30.00 | $0.40–$180.00 |
 | **Anthropic** | Claude Opus 4.8, Claude Sonnet 4.6, Claude Haiku 4.5 | $1.00–$5.00 | $5.00–$25.00 |
 | **Google** | Gemini 3.5 Flash (thinking), Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash | $0.10–$2.00 | $0.40–$12.00 |
-| **xAI** | Grok 4.1 Fast, Grok 3, Grok Code Fast 1 | $0.20–$3.00 | $0.50–$15.00 |
-| **DeepSeek** | DeepSeek Chat, DeepSeek Reasoner | $0.28 | $0.42 |
+| **xAI** | Grok 4.3 (1M, reasoning + vision), Grok Build 0.1 (256K, agentic coding) | $1.50 | $3.00–$4.00 |
+| **DeepSeek** | DeepSeek V4 Pro, DeepSeek Chat, DeepSeek Reasoner | $0.20–$0.435 | $0.40–$0.87 |
+| **ZAI** | GLM-5.1 ($1.40/$4.40 per-token), GLM-5 / GLM-5-Turbo (flat $0.001/call) | — | — |
+| **ElevenLabs** | Flash v2.5, Turbo v2.5, Multilingual v2, v3 (TTS $0.05–0.10/1k chars), Sound Effects ($0.05/gen) | — | — |
 | **Moonshot** | Kimi K2.6 (256K, vision + reasoning) | $0.95 | $4.00 |
 | **Moonshot** | Kimi K2.5 (262K context, legacy) | $0.60 | $3.00 |
 | **NVIDIA** | DeepSeek V4 Pro/Flash, Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral (9 models) | **FREE** | **FREE** |
