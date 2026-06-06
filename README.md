@@ -761,7 +761,7 @@ for _, w := range wallets {
 | **Google** | Gemini 3.5 Flash (thinking), Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash | $0.10–$2.00 | $0.40–$12.00 |
 | **xAI** | Grok 4.3 (1M, reasoning + vision), Grok Build 0.1 (256K, agentic coding) | $1.50 | $3.00–$4.00 |
 | **DeepSeek** | DeepSeek V4 Pro, DeepSeek Chat, DeepSeek Reasoner | $0.20–$0.435 | $0.40–$0.87 |
-| **ZAI** | GLM-5.1 ($1.40/$4.40 per-token), GLM-5 / GLM-5-Turbo (flat $0.001/call) | — | — |
+| **ZAI** | GLM-5.1 ($1.40/$4.40), GLM-5 ($0.60/$1.92), GLM-5-Turbo ($1.20/$4.00) | $0.60–$1.40 | $1.92–$4.40 |
 | **ElevenLabs** | Flash v2.5, Turbo v2.5, Multilingual v2, v3 (TTS $0.05–0.10/1k chars), Sound Effects ($0.05/gen) | — | — |
 | **Moonshot** | Kimi K2.6 (256K, vision + reasoning) | $0.95 | $4.00 |
 | **Moonshot** | Kimi K2.5 (262K context, legacy) | $0.60 | $3.00 |
