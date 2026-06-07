@@ -2,6 +2,16 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.15.0
+
+Backfills four endpoint families the Go SDK never covered, and fixes a payment bug in `PM()`.
+
+- **`Exa*` — Exa web search (`/v1/exa/*`, coverage backfill; Python/TS had it since March).** `Exa(path, body)` + `ExaSearch` / `ExaFindSimilar` / `ExaContents` / `ExaAnswer` on `*LLMClient`. $0.01/request (contents $0.002/URL).
+- **`Defi*` — DefiLlama (`/v1/defillama/*`, live since 2026-05-02).** `Defi(path, params)` + `DefiProtocols` / `DefiProtocol` / `DefiChains` / `DefiYields` / `DefiPrices`. $0.005/call (prices $0.001). Array responses are wrapped as `{"data": [...]}`.
+- **`Dex*` — 0x Swap + Gasless (`/v1/zerox/*`, live since 2026-05-02).** Free (no x402; BlockRun monetizes via on-chain affiliate fee): `Dex(path, params)` + `DexPrice` / `DexQuote` / `DexGaslessPrice` / `DexGaslessQuote` / `DexGaslessSubmit` (POST) / `DexGaslessStatus` / `DexChains` / `DexGaslessChains`.
+- **`Modal*` — Modal sandbox compute (`/v1/modal/*`, live since 2026-04-09).** `Modal(path, body)` + `ModalSandboxCreate` ($0.01 CPU / $0.05 GPU) / `ModalSandboxExec` / `ModalSandboxStatus` / `ModalSandboxTerminate` ($0.001 each).
+- **Fix: `PM()` (paid GET) now actually pays.** It previously used the payment-blind `doGet`, so any 402 from `/v1/pm/*` surfaced as an `APIError` instead of being signed and retried. Now routed through `doGetWithPayment` (same flow as the Pyth market client). `PMQuery` (POST) was already payment-aware.
+
 ## 0.14.0
 
 Removes the X/Twitter (AttentionVC) surface — the backend dropped the integration on 2026-04-30 and every `/v1/x/*` endpoint has returned HTTP 404 since.

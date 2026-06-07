@@ -403,6 +403,64 @@ so new chains work without an SDK update. Hot, low-volatility reads
 (`eth_chainId`, mined blocks/receipts, `getTransaction`, ...) are served from
 a method-aware gateway cache — same price, lower latency.
 
+## Exa Web Search
+
+Neural + keyword web search, similarity search, content extraction, and
+grounded answers ($0.01/request; contents $0.002/URL). Powered by Exa.
+
+```go
+results, err := client.ExaSearch(ctx, "latest AI safety research", map[string]any{"numResults": 5})
+similar, err := client.ExaFindSimilar(ctx, "https://openai.com/research", nil)
+content, err := client.ExaContents(ctx, []string{"https://arxiv.org/abs/2303.08774"}, nil)
+answer, err := client.ExaAnswer(ctx, "What is x402?", nil)
+```
+
+## DeFi Data (Powered by DefiLlama)
+
+GET passthrough to DefiLlama — protocols, TVL, yields, token prices.
+$0.005/call ($0.001 for price lookups).
+
+```go
+protocols, err := client.DefiProtocols(ctx)              // all protocols + TVL
+aave, err := client.DefiProtocol(ctx, "aave")            // one protocol + history
+chains, err := client.DefiChains(ctx)                    // TVL by chain
+pools, err := client.DefiYields(ctx, map[string]string{"chain": "Base"})
+prices, err := client.DefiPrices(ctx, []string{"coingecko:bitcoin"})
+```
+
+## DEX Swaps (Powered by 0x)
+
+Free passthrough to the 0x Swap + Gasless APIs — **no x402 payment**
+(BlockRun takes an on-chain affiliate fee on executed swaps instead).
+
+```go
+price, err := client.DexPrice(ctx, map[string]string{
+    "chainId": "8453", "sellToken": "0x...", "buyToken": "0x...",
+    "sellAmount": "1000000",
+})
+quote, err := client.DexQuote(ctx, map[string]string{ /* + "taker" */ })
+
+// Gasless flow: quote -> sign trade.eip712 -> submit -> poll
+gq, err := client.DexGaslessQuote(ctx, params)
+res, err := client.DexGaslessSubmit(ctx, map[string]any{"trade": signedTrade})
+status, err := client.DexGaslessStatus(ctx, res["tradeHash"].(string))
+
+chains, err := client.DexChains(ctx)            // supported swap chains
+gchains, err := client.DexGaslessChains(ctx)    // supported gasless chains
+```
+
+## Cloud Compute (Powered by Modal)
+
+Pay-per-call sandboxed compute — $0.01/create (CPU; $0.05 with GPU),
+$0.001 per exec/status/terminate.
+
+```go
+sb, err := client.ModalSandboxCreate(ctx, map[string]any{"image": "python:3.11"})
+out, err := client.ModalSandboxExec(ctx, sb["sandbox_id"].(string), []string{"python", "-c", "print(42)"})
+fmt.Println(out["stdout"]) // 42
+_, err = client.ModalSandboxTerminate(ctx, sb["sandbox_id"].(string))
+```
+
 ## Prediction Markets
 
 Access Polymarket, Kalshi, and more via Predexon.
