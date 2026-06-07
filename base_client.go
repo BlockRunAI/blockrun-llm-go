@@ -105,10 +105,19 @@ func (bc *baseClient) GetSpending() Spending {
 // doRequest makes a POST request to the given endpoint with automatic x402
 // payment handling. It returns the raw response bytes for the caller to unmarshal.
 func (bc *baseClient) doRequest(ctx context.Context, endpoint string, body map[string]any) ([]byte, error) {
+	data, _, err := bc.doRequestHeaders(ctx, endpoint, body)
+	return data, err
+}
+
+// doRequestHeaders is doRequest plus the final HTTP response headers, for
+// endpoints that surface gateway metadata in headers (e.g. /v1/rpc/{network}
+// returns X-Network / X-Cache / X-Payment-Receipt). Headers are nil when the
+// response was served from the local cache.
+func (bc *baseClient) doRequestHeaders(ctx context.Context, endpoint string, body map[string]any) ([]byte, http.Header, error) {
 	// Check cache before making request
 	if bc.cache != nil {
 		if cached, ok := bc.cache.Get(endpoint, body); ok {
-			return cached, nil
+			return cached, nil, nil
 		}
 	}
 
@@ -117,31 +126,31 @@ func (bc *baseClient) doRequest(ctx context.Context, endpoint string, body map[s
 	// Encode body
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode request body: %w", err)
+		return nil, nil, fmt.Errorf("failed to encode request body: %w", err)
 	}
 
 	// First attempt (will likely return 402)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := bc.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Handle 402 Payment Required
 	if resp.StatusCode == http.StatusPaymentRequired {
-		return bc.handlePaymentAndRetry(ctx, url, jsonBody, resp)
+		return bc.handlePaymentAndRetryHeaders(ctx, url, jsonBody, resp)
 	}
 
 	// Handle other errors
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, &APIError{
+		return nil, nil, &APIError{
 			StatusCode: resp.StatusCode,
 			Message:    fmt.Sprintf("API error: %s", string(bodyBytes)),
 		}
@@ -150,7 +159,7 @@ func (bc *baseClient) doRequest(ctx context.Context, endpoint string, body map[s
 	// Read successful response
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Store in cache
@@ -158,7 +167,7 @@ func (bc *baseClient) doRequest(ctx context.Context, endpoint string, body map[s
 		bc.cache.Set(endpoint, body, data)
 	}
 
-	return data, nil
+	return data, resp.Header, nil
 }
 
 // doGet makes a GET request to the given endpoint and returns raw response bytes.
@@ -368,6 +377,13 @@ func urlQueryEscape(s string) string {
 
 // handlePaymentAndRetry handles a 402 response by signing a payment and retrying.
 func (bc *baseClient) handlePaymentAndRetry(ctx context.Context, url string, body []byte, resp *http.Response) ([]byte, error) {
+	data, _, err := bc.handlePaymentAndRetryHeaders(ctx, url, body, resp)
+	return data, err
+}
+
+// handlePaymentAndRetryHeaders is handlePaymentAndRetry plus the retry
+// response headers (settlement receipt, gateway metadata).
+func (bc *baseClient) handlePaymentAndRetryHeaders(ctx context.Context, url string, body []byte, resp *http.Response) ([]byte, http.Header, error) {
 	// Get payment required header
 	paymentHeader := resp.Header.Get("payment-required")
 	if paymentHeader == "" {
@@ -383,19 +399,19 @@ func (bc *baseClient) handlePaymentAndRetry(ctx context.Context, url string, bod
 	}
 
 	if paymentHeader == "" {
-		return nil, &PaymentError{Message: "402 response but no payment requirements found"}
+		return nil, nil, &PaymentError{Message: "402 response but no payment requirements found"}
 	}
 
 	// Parse payment requirements
 	paymentReq, err := ParsePaymentRequired(paymentHeader)
 	if err != nil {
-		return nil, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
+		return nil, nil, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
 	}
 
 	// Extract payment details
 	paymentOption, err := ExtractPaymentDetails(paymentReq)
 	if err != nil {
-		return nil, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
+		return nil, nil, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
 	}
 
 	// Determine resource URL
@@ -417,32 +433,32 @@ func (bc *baseClient) handlePaymentAndRetry(ctx context.Context, url string, bod
 		paymentReq.Extensions,
 	)
 	if err != nil {
-		return nil, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
+		return nil, nil, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
 	}
 
 	// Retry with payment signature
 	retryReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create retry request: %w", err)
+		return nil, nil, fmt.Errorf("failed to create retry request: %w", err)
 	}
 	retryReq.Header.Set("Content-Type", "application/json")
 	retryReq.Header.Set("PAYMENT-SIGNATURE", paymentPayload)
 
 	retryResp, err := bc.httpClient.Do(retryReq)
 	if err != nil {
-		return nil, fmt.Errorf("retry request failed: %w", err)
+		return nil, nil, fmt.Errorf("retry request failed: %w", err)
 	}
 	defer retryResp.Body.Close()
 
 	// Check for payment rejection
 	if retryResp.StatusCode == http.StatusPaymentRequired {
-		return nil, &PaymentError{Message: "Payment was rejected. Check your wallet balance."}
+		return nil, nil, &PaymentError{Message: "Payment was rejected. Check your wallet balance."}
 	}
 
 	// Handle other errors
 	if retryResp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(retryResp.Body)
-		return nil, &APIError{
+		return nil, nil, &APIError{
 			StatusCode: retryResp.StatusCode,
 			Message:    fmt.Sprintf("API error after payment: %s", string(bodyBytes)),
 		}
@@ -451,7 +467,7 @@ func (bc *baseClient) handlePaymentAndRetry(ctx context.Context, url string, bod
 	// Read successful response
 	respBytes, err := io.ReadAll(retryResp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	// Track spending - convert amount from micro-USDC to USD
@@ -473,5 +489,5 @@ func (bc *baseClient) handlePaymentAndRetry(ctx context.Context, url string, bod
 		bc.costLog.Append(endpoint, costUSD)
 	}
 
-	return respBytes, nil
+	return respBytes, retryResp.Header, nil
 }

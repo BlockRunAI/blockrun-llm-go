@@ -64,18 +64,22 @@ type SmartChatOptions struct {
 // the flagship paid SKU ($0.435 in / $0.87 out — the 75% launch promo
 // became DeepSeek's permanent list price after 2026-05-31).
 //
-// NVIDIA free-tier churn (2026-04-28 → 2026-04-30): nvidia/gpt-oss-120b
-// and nvidia/gpt-oss-20b were briefly delisted over privacy concerns then
-// re-enabled with `available: true` + `hidden: true` — they no longer
-// appear in `/v1/models` but direct calls by full ID still return HTTP 200,
-// which is fine for the Go SDK because routingTable here doesn't consult
-// `/v1/models`. Added nvidia/deepseek-v4-pro and nvidia/deepseek-v4-flash
-// (1M context). v4-pro, v3.2, and glm-4.7 are hidden because NVIDIA's NIM
-// deployment is hung; backend MODEL_REDIRECTS transparently forwards calls
-// to v4-flash / qwen3-coder. TierMedium below is pinned to visible
-// v4-flash so SmartChatResponse.Model reports the model that actually
-// answered (was nvidia/deepseek-v3.2 — silently redirected); TierSimple
-// keeps nvidia/gpt-oss-120b since heavy users rely on it.
+// NVIDIA free-tier refresh (2026-06-07 live sweep, every visible free model
+// probed):
+//   - nvidia/qwen3-next-80b-a3b-thinking hit NVIDIA END-OF-LIFE 2026-05-21
+//     (HTTP 410 Gone; the gateway redirects pinned callers to
+//     llama-4-maverick) — dropped as the Complex/Reasoning primary.
+//   - nvidia/mistral-small-4-119b is timing out upstream (3/3 probes >60s) —
+//     do not route to it.
+//   - nvidia/deepseek-v4-flash probed healthy (896ms; recovered from the
+//     05-09 NIM regression) and keeps 1M context — TierSimple primary,
+//     replacing privacy-encumbered nvidia/gpt-oss-120b (NVIDIA's free tier
+//     may use prompts for service improvement; a privacy-sensitive default
+//     was wrong for auto-routing — direct calls by full ID still work).
+//   - TierComplex → nvidia/qwen3-coder-480b (871ms, 480B MoE);
+//     TierReasoning → nvidia/nemotron-3-nano-omni-30b-a3b-reasoning (681ms,
+//     256K ctx, explicit reasoning + vision). Table now matches the Python
+//     SDK's FREE_TIERS.
 //
 // Gemini 3.5 Flash promotion (2026-05-27): google/gemini-3.5-flash is the
 // latest-generation Flash with built-in thinking mode ($0.50 in / $3.00 out,
@@ -89,8 +93,8 @@ type SmartChatOptions struct {
 // IDs remain available for clients pinned to their pricing.
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	RoutingFree: {
-		TierSimple: "nvidia/gpt-oss-120b", TierMedium: "nvidia/deepseek-v4-flash",
-		TierComplex: "nvidia/qwen3-next-80b-a3b-thinking", TierReasoning: "nvidia/qwen3-next-80b-a3b-thinking",
+		TierSimple: "nvidia/deepseek-v4-flash", TierMedium: "nvidia/llama-4-maverick",
+		TierComplex: "nvidia/qwen3-coder-480b", TierReasoning: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
 	},
 	RoutingEco: {
 		TierSimple: "moonshot/kimi-k2.6", TierMedium: "deepseek/deepseek-chat",
