@@ -10,20 +10,20 @@ import (
 
 func TestCacheKey(t *testing.T) {
 	// Same inputs should produce the same key
-	key1 := cacheKey("/v1/x/tweets", map[string]any{"query": "test"})
-	key2 := cacheKey("/v1/x/tweets", map[string]any{"query": "test"})
+	key1 := cacheKey("/v1/pm/markets", map[string]any{"query": "test"})
+	key2 := cacheKey("/v1/pm/markets", map[string]any{"query": "test"})
 	if key1 != key2 {
 		t.Errorf("cacheKey not consistent: %s != %s", key1, key2)
 	}
 
 	// Different inputs should produce different keys
-	key3 := cacheKey("/v1/x/tweets", map[string]any{"query": "other"})
+	key3 := cacheKey("/v1/pm/markets", map[string]any{"query": "other"})
 	if key1 == key3 {
 		t.Errorf("cacheKey collision: same key for different inputs")
 	}
 
 	// Different endpoints should produce different keys
-	key4 := cacheKey("/v1/pm/markets", map[string]any{"query": "test"})
+	key4 := cacheKey("/v1/search", map[string]any{"query": "test"})
 	if key1 == key4 {
 		t.Errorf("cacheKey collision: same key for different endpoints")
 	}
@@ -42,8 +42,8 @@ func TestTTLFor(t *testing.T) {
 		wantZero bool
 		wantMin  time.Duration
 	}{
-		{"/v1/x/tweets", false, 1 * time.Hour},
-		{"/v1/x/user/profile", false, 1 * time.Hour},
+		{"/v1/pm/markets", false, 30 * time.Minute},
+		{"/v1/pm/markets/detail", false, 30 * time.Minute},
 		{"/v1/pm/markets", false, 30 * time.Minute},
 		{"/v1/pm/events", false, 30 * time.Minute},
 		{"/v1/search", false, 15 * time.Minute},
@@ -68,7 +68,7 @@ func TestCacheHitMiss(t *testing.T) {
 	dir := t.TempDir()
 	c := newCacheWithDir(dir)
 
-	endpoint := "/v1/x/tweets"
+	endpoint := "/v1/pm/markets"
 	body := map[string]any{"query": "golang"}
 	response := []byte(`{"data":[{"text":"hello"}]}`)
 
@@ -118,7 +118,7 @@ func TestCacheTTLExpiration(t *testing.T) {
 	dir := t.TempDir()
 	c := newCacheWithDir(dir)
 
-	endpoint := "/v1/x/tweets"
+	endpoint := "/v1/pm/markets"
 	body := map[string]any{"query": "test"}
 	response := []byte(`{"data": []}`)
 
@@ -126,7 +126,7 @@ func TestCacheTTLExpiration(t *testing.T) {
 	key := cacheKey(endpoint, body)
 	path := filepath.Join(dir, key+".json")
 
-	// Set cached_at to 2 hours ago (TTL for /v1/x/ is 1 hour)
+	// Set cached_at to 2 hours ago (TTL for /v1/pm/ is 30 minutes)
 	pastTime := float64(time.Now().Add(-2*time.Hour).UnixNano()) / 1e9
 	entryJSON := []byte(`{"cached_at":` + formatFloat(pastTime) + `,"endpoint":"` + endpoint + `","response":` + string(response) + `}`)
 	os.WriteFile(path, entryJSON, 0644)
@@ -142,7 +142,7 @@ func TestCacheClear(t *testing.T) {
 	c := newCacheWithDir(dir)
 
 	// Add some entries
-	c.Set("/v1/x/tweets", map[string]any{"q": "a"}, []byte(`{"a":1}`))
+	c.Set("/v1/pm/markets", map[string]any{"q": "a"}, []byte(`{"a":1}`))
 	c.Set("/v1/pm/markets", map[string]any{"q": "b"}, []byte(`{"b":2}`))
 
 	// Verify files exist
@@ -169,7 +169,7 @@ func TestCacheClear(t *testing.T) {
 	}
 
 	// Verify cache misses
-	if _, ok := c.Get("/v1/x/tweets", map[string]any{"q": "a"}); ok {
+	if _, ok := c.Get("/v1/pm/markets", map[string]any{"q": "a"}); ok {
 		t.Error("expected cache miss after Clear")
 	}
 }

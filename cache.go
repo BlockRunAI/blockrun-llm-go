@@ -13,7 +13,6 @@ import (
 
 // Default TTL values by endpoint pattern.
 var defaultTTL = map[string]time.Duration{
-	"/v1/x/":      1 * time.Hour,
 	"/v1/pm/":     30 * time.Minute,
 	"/v1/search":  15 * time.Minute,
 	"/v1/chat/":   0, // no cache

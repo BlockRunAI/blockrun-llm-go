@@ -2,6 +2,14 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.14.0
+
+Removes the X/Twitter (AttentionVC) surface — the backend dropped the integration on 2026-04-30 and every `/v1/x/*` endpoint has returned HTTP 404 since.
+
+- **BREAKING: deleted `x_twitter.go` / `x_twitter_types.go`** — the 15 `X*` methods on `*LLMClient` (`XUserLookup`, `XFollowers`, `XSearch`, `XTrending`, ...) and their `X*` response types are gone. If you need X/Twitter data, use Grok Live Search (`Search` with the `x` source) instead.
+- Cache: dropped the dead `/v1/x/` TTL rule; `readRequestBody` test helper moved to `prediction_market_test.go`.
+- README: X/Twitter section removed.
+
 ## 0.13.0
 
 Adds the new multi-chain RPC client, the 2026-06-02 Seedance video parameters, and rebuilds the free routing tier from a live sweep.

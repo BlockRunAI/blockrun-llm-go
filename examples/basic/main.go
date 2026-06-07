@@ -89,14 +89,6 @@ func main() {
 	}
 	fmt.Println()
 
-	// Example 6: X/Twitter data
-	fmt.Println("=== X/Twitter Trending ===")
-	trending, err := client.XTrending(ctx)
-	if err != nil {
-		log.Printf("XTrending: %v", err)
-	} else {
-		fmt.Printf("Trending topics: %d\n\n", len(trending.Topics))
-	}
 
 	// Example 7: Search
 	fmt.Println("=== Web Search ===")
