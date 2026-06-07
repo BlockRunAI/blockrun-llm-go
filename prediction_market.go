@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 )
 
 // PM fetches prediction market data via GET request.
@@ -18,15 +17,9 @@ func (c *LLMClient) PM(ctx context.Context, path string, params map[string]strin
 
 	endpoint := "/v1/pm/" + path
 
-	if len(params) > 0 {
-		q := url.Values{}
-		for k, v := range params {
-			q.Set(k, v)
-		}
-		endpoint += "?" + q.Encode()
-	}
-
-	respBytes, err := c.doGet(ctx, endpoint)
+	// Paid GET — doGetWithPayment signs the x402 challenge on 402 (doGet
+	// would surface the 402 as an APIError and never pay).
+	respBytes, err := c.doGetWithPayment(ctx, endpoint, params)
 	if err != nil {
 		return nil, err
 	}
