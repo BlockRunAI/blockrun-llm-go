@@ -3,10 +3,26 @@ package blockrun
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
+
+// readRequestBody decodes a JSON request body in test handlers.
+// (Moved here from x_twitter_test.go when the X/Twitter surface was removed.)
+func readRequestBody(t *testing.T, r *http.Request) map[string]any {
+	t.Helper()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("Failed to read request body: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatalf("Failed to unmarshal request body: %v", err)
+	}
+	return result
+}
 
 func TestPMGetWithoutParams(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -59,7 +59,7 @@ func WithHTTPClient(client *http.Client) ClientOption {
 }
 
 // WithCache enables or disables local response caching with per-endpoint TTL.
-// Cached endpoints: /v1/x/ (1h), /v1/pm/ (30m), /v1/search (15m).
+// Cached endpoints: /v1/pm/ (30m), /v1/search (15m).
 // Chat and image endpoints are never cached.
 func WithCache(enabled bool) ClientOption {
 	return func(c *LLMClient) {

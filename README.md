@@ -95,7 +95,7 @@ fmt.Println(result.Response) // "4"
 | **Smart Routing** | Auto-selects the best model for your prompt |
 | **Streaming** | SSE streaming for real-time responses |
 | **Tool Calling** | OpenAI-compatible function/tool calling |
-| **X/Twitter Data** | 15 endpoints for users, tweets, search, analytics |
+| **Multi-chain RPC** | JSON-RPC 2.0 to 40+ chains, $0.002/call |
 | **Web Search** | Search web, X/Twitter, and news |
 | **Prediction Markets** | Polymarket, Kalshi data access |
 | **Image Generation** | DALL-E 3, GPT Image 1/2, Nano Banana, Flux, CogView-4, Grok Imagine |
@@ -310,50 +310,6 @@ if len(result.Choices[0].Message.ToolCalls) > 0 {
     fmt.Printf("Tool: %s(%s)\n", call.Function.Name, call.Function.Arguments)
 }
 ```
-
-## X/Twitter Data
-
-15 endpoints for real-time X/Twitter intelligence. All powered by AttentionVC.
-
-```go
-// Look up users
-users, err := client.XUserLookup(ctx, []string{"elonmusk", "vaborsh"})
-
-// Get followers
-followers, err := client.XFollowers(ctx, "elonmusk", "")
-
-// Search tweets
-results, err := client.XSearch(ctx, "bitcoin", "Latest", "")
-
-// Trending topics
-trending, err := client.XTrending(ctx)
-
-// Author analytics
-analytics, err := client.XAuthorAnalytics(ctx, "vaborsh")
-
-// Compare authors
-comparison, err := client.XCompareAuthors(ctx, "elonmusk", "vaborsh")
-```
-
-**All X/Twitter Methods:**
-
-| Method | Endpoint | Price |
-|--------|----------|-------|
-| `XUserLookup` | User profiles by username | $0.002/user |
-| `XFollowers` | Follower list | $0.05/page |
-| `XFollowings` | Following list | $0.05/page |
-| `XUserInfo` | Detailed profile | $0.002 |
-| `XVerifiedFollowers` | Verified followers | $0.048/page |
-| `XUserTweets` | User's tweets | $0.032/page |
-| `XUserMentions` | Mentions of user | $0.032/page |
-| `XTweetLookup` | Tweets by ID | $0.16/batch |
-| `XTweetReplies` | Replies to tweet | $0.032/page |
-| `XTweetThread` | Full thread | $0.032/page |
-| `XSearch` | Search tweets | $0.032/page |
-| `XTrending` | Trending topics | $0.002 |
-| `XArticlesRising` | Viral articles | $0.05 |
-| `XAuthorAnalytics` | Author metrics | $0.02 |
-| `XCompareAuthors` | Compare authors | $0.05 |
 
 ## Web Search
 
@@ -769,7 +725,6 @@ client, err := blockrun.NewLLMClient("", blockrun.WithCache(true))
 ```
 
 Cache TTLs by endpoint:
-- X/Twitter: 1 hour
 - Prediction Markets: 30 minutes
 - Search: 15 minutes
 - Chat/Images: never cached
@@ -875,7 +830,7 @@ if err != nil {
 ## FAQ
 
 **What is blockrun-llm-go?**
-A Go SDK for pay-per-request access to 40+ LLMs, X/Twitter data, web search, prediction markets, and image generation. Uses x402 micropayments — no API keys, no subscriptions.
+A Go SDK for pay-per-request access to 40+ LLMs, multi-chain RPC, web search, prediction markets, and image generation. Uses x402 micropayments — no API keys, no subscriptions.
 
 **How much does it cost?**
 Pay only for what you use. 9 NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 USDC gets you thousands of paid-model requests.
