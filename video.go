@@ -104,8 +104,24 @@ type VideoGenerateOptions struct {
 	// RealFace (via RealFaceClient). Seedance 2.0 fast/pro only. Mutually
 	// exclusive with ImageURL.
 	RealFaceAssetID string `json:"real_face_asset_id,omitempty"`
+	// LastFrameURL enables first-and-last-frame interpolation: a second image
+	// that seeds the FINAL frame so the model tweens from ImageURL →
+	// LastFrameURL. Requires ImageURL (the first frame) and a Seedance model
+	// (bytedance/seedance-1.5-pro, seedance-2.0, or seedance-2.0-fast).
+	// Priced identically to image-to-video. Mutually exclusive with
+	// RealFaceAssetID.
+	LastFrameURL string `json:"last_frame_url,omitempty"`
+	// ReferenceImageURLs is the omni / multi-reference input: up to 9
+	// reference image URLs for character/style consistency (Seedance 2.0
+	// only). Cite them as "image 1", "image 2" in the prompt. Mutually
+	// exclusive with ImageURL / LastFrameURL / RealFaceAssetID.
+	ReferenceImageURLs []string `json:"reference_image_urls,omitempty"`
 	// DurationSeconds is the duration to bill for (defaults to model's default duration).
 	DurationSeconds int `json:"duration_seconds,omitempty"`
+	// AspectRatio overrides the output aspect ratio — "adaptive" / "16:9" /
+	// "9:16" / "1:1" / "4:3" / "3:4" / "21:9" / "9:21". Seedance only; Grok
+	// ignores it.
+	AspectRatio string `json:"aspect_ratio,omitempty"`
 	// Resolution overrides the output resolution — "360p" / "480p" / "720p" /
 	// "1080p" / "4K". Seedance defaults to "720p"; Grok ignores it.
 	Resolution string `json:"resolution,omitempty"`
@@ -114,6 +130,14 @@ type VideoGenerateOptions struct {
 	// generation; Grok ignores it. Use a pointer so the field can be left
 	// unset (nil) to defer to the model default.
 	GenerateAudio *bool `json:"generate_audio,omitempty"`
+	// Seed is a deterministic generation seed (Seedance only). Use a pointer
+	// so 0 is a valid explicit seed.
+	Seed *int `json:"seed,omitempty"`
+	// Watermark embeds the upstream watermark on the output (Seedance only).
+	Watermark *bool `json:"watermark,omitempty"`
+	// ReturnLastFrame also returns the final frame as an image alongside the
+	// clip — useful for chaining (Seedance only).
+	ReturnLastFrame bool `json:"return_last_frame,omitempty"`
 }
 
 // VideoClip represents a single generated video clip.
@@ -174,11 +198,43 @@ func (c *VideoClient) Generate(ctx context.Context, prompt string, opts *VideoGe
 				Message: "RealFaceAssetID must start with 'ta_' (a Virtual Portrait or RealFace asset id, e.g. 'ta_abc123xyz' — enroll via PortraitClient or RealFaceClient)",
 			}
 		}
+		if opts.LastFrameURL != "" && opts.ImageURL == "" {
+			return nil, &ValidationError{
+				Field:   "LastFrameURL",
+				Message: "LastFrameURL requires ImageURL: ImageURL seeds the FIRST frame and LastFrameURL the FINAL frame — send both",
+			}
+		}
+		if opts.LastFrameURL != "" && opts.RealFaceAssetID != "" {
+			return nil, &ValidationError{
+				Field:   "LastFrameURL",
+				Message: "LastFrameURL and RealFaceAssetID are mutually exclusive; first-and-last-frame uses ImageURL + LastFrameURL",
+			}
+		}
+		if len(opts.ReferenceImageURLs) > 0 {
+			if opts.ImageURL != "" || opts.LastFrameURL != "" || opts.RealFaceAssetID != "" {
+				return nil, &ValidationError{
+					Field:   "ReferenceImageURLs",
+					Message: "ReferenceImageURLs is mutually exclusive with ImageURL, LastFrameURL, and RealFaceAssetID",
+				}
+			}
+			if len(opts.ReferenceImageURLs) > 9 {
+				return nil, &ValidationError{
+					Field:   "ReferenceImageURLs",
+					Message: "ReferenceImageURLs accepts at most 9 images",
+				}
+			}
+		}
 		if opts.Model != "" {
 			body["model"] = opts.Model
 		}
 		if opts.ImageURL != "" {
 			body["image_url"] = opts.ImageURL
+		}
+		if opts.LastFrameURL != "" {
+			body["last_frame_url"] = opts.LastFrameURL
+		}
+		if len(opts.ReferenceImageURLs) > 0 {
+			body["reference_image_urls"] = opts.ReferenceImageURLs
 		}
 		if opts.RealFaceAssetID != "" {
 			body["real_face_asset_id"] = opts.RealFaceAssetID
@@ -186,11 +242,23 @@ func (c *VideoClient) Generate(ctx context.Context, prompt string, opts *VideoGe
 		if opts.DurationSeconds > 0 {
 			body["duration_seconds"] = opts.DurationSeconds
 		}
+		if opts.AspectRatio != "" {
+			body["aspect_ratio"] = opts.AspectRatio
+		}
 		if opts.Resolution != "" {
 			body["resolution"] = opts.Resolution
 		}
 		if opts.GenerateAudio != nil {
 			body["generate_audio"] = *opts.GenerateAudio
+		}
+		if opts.Seed != nil {
+			body["seed"] = *opts.Seed
+		}
+		if opts.Watermark != nil {
+			body["watermark"] = *opts.Watermark
+		}
+		if opts.ReturnLastFrame {
+			body["return_last_frame"] = true
 		}
 	}
 

@@ -48,7 +48,7 @@ Want to kick the tires before funding a wallet? Route to BlockRun's free NVIDIA 
 
 ```go
 // Option 1: call a free model directly
-reply, _ := client.Chat(ctx, "nvidia/qwen3-next-80b-a3b-thinking", "Explain x402 in 1 sentence")
+reply, _ := client.Chat(ctx, "nvidia/deepseek-v4-flash", "Explain x402 in 1 sentence")
 
 // Option 2: let the smart router pick the best free model per request
 result, _ := client.SmartChat(ctx, "What is 2+2?", &blockrun.SmartChatOptions{
@@ -58,22 +58,23 @@ fmt.Println(result.Model)    // e.g. "nvidia/deepseek-v4-flash"
 fmt.Println(result.Response) // "4"
 ```
 
-**Available free models** (input + output both $0, all NVIDIA-hosted, last refreshed 2026-04-28):
+**Available free models** (input + output both $0, all NVIDIA-hosted, last refreshed 2026-06-07):
 
 | Model ID | Context | Best For |
 |----------|---------|----------|
 | `nvidia/deepseek-v4-flash` | 1M | DeepSeek V4 Flash — 284B / 13B active MoE, ~5× faster than V4 Pro. Best free chat / summarization / light reasoning |
 | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | 256K | Only vision-capable free model — text + images + video (≤2 min) + audio (≤1 hr) |
-| `nvidia/qwen3-next-80b-a3b-thinking` | 131K | 116 tok/s reasoning with thinking mode |
-| `nvidia/mistral-small-4-119b` | 131K | 114 tok/s — fastest free chat |
 | `nvidia/llama-4-maverick` | 131K | Meta Llama 4 Maverick MoE |
+| `nvidia/mistral-small-4-119b` | 131K | ⚠️ Upstream timing out as of 2026-06-07 — avoid until NVIDIA recovers it |
 | `nvidia/qwen3-coder-480b` | 131K | Coding-optimised 480B MoE |
 | `nvidia/gpt-oss-120b` | 128K | OpenAI open-weight 120B — 123 tok/s. Hidden from `/v1/models` for privacy but direct calls by full ID still work |
 | `nvidia/gpt-oss-20b` | 128K | OpenAI open-weight 20B — 155 tok/s. Hidden from `/v1/models` but direct calls still work |
 
 > Need V4-Pro-class reasoning? Use the paid `deepseek/deepseek-v4-pro` ($0.435/$0.87 — the 75% launch promo became the permanent list price after 2026-05-31) — `nvidia/deepseek-v4-pro` is currently hidden because NVIDIA's NIM deployment is hung; backend MODEL_REDIRECTS forwards calls to V4 Flash.
 
-> Note: `nvidia/gpt-oss-120b` and `nvidia/gpt-oss-20b` were retired 2026-04-28 — NVIDIA's free build.nvidia.com tier reserves the right to use prompts/outputs for service improvement, which conflicts with our data-privacy policy.
+> Note: `nvidia/gpt-oss-120b` and `nvidia/gpt-oss-20b` are hidden from `/v1/models` — NVIDIA's free build.nvidia.com tier reserves the right to use prompts/outputs for service improvement, so SmartChat never auto-routes to them. Direct calls by full ID still work; opt in only when your data isn't sensitive.
+
+> Retired: `nvidia/qwen3-next-80b-a3b-thinking` hit NVIDIA end-of-life 2026-05-21 (HTTP 410). The gateway auto-redirects pinned callers to `nvidia/llama-4-maverick`.
 
 ## How It Works
 
@@ -227,7 +228,7 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 
 | Profile | Simple | Medium | Complex | Reasoning |
 |---------|--------|--------|---------|-----------|
-| **free** | nvidia/gpt-oss-120b | nvidia/deepseek-v4-flash | nvidia/qwen3-next-80b-a3b-thinking | nvidia/qwen3-next-80b-a3b-thinking |
+| **free** | nvidia/deepseek-v4-flash | nvidia/llama-4-maverick | nvidia/qwen3-coder-480b | nvidia/nemotron-3-nano-omni-30b-a3b-reasoning |
 | **eco** | moonshot/kimi-k2.6 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
 | **auto** | moonshot/kimi-k2.6 | google/gemini-3.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
 | **premium** | google/gemini-3.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.8 | openai/o3 |
@@ -241,12 +242,14 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 > `deepseek-reasoner` as the eco/auto reasoning primary because V4 Flash
 > thinking is cheaper.
 >
-> NVIDIA free tier refreshed 2026-04-28: added `nvidia/deepseek-v4-flash`
-> (1M context) and `nvidia/nemotron-3-nano-omni` (vision). `nvidia/gpt-oss-120b`
-> and `nvidia/gpt-oss-20b` were briefly delisted then **re-enabled
-> 2026-04-30** with `available: true` + `hidden: true` — they no longer
-> appear in `/v1/models` (so SmartChat won't auto-pick them) but direct
-> calls by full ID still return HTTP 200. Retired IDs (`nvidia/nemotron-*`,
+> NVIDIA free routing rebuilt 2026-06-07 from a live sweep:
+> `nvidia/qwen3-next-80b-a3b-thinking` hit NVIDIA end-of-life 2026-05-21
+> (HTTP 410) and `nvidia/mistral-small-4-119b` is timing out upstream — both
+> dropped. Free now routes Simple → deepseek-v4-flash (1M context), Medium →
+> llama-4-maverick, Complex → qwen3-coder-480b, Reasoning →
+> nemotron-3-nano-omni (matches the Python SDK). `nvidia/gpt-oss-120b` /
+> `gpt-oss-20b` remain hidden for privacy (direct calls by full ID still
+> return HTTP 200). Retired IDs (`nvidia/nemotron-*`,
 > `nvidia/mistral-large-3-675b`, `nvidia/devstral-2-123b`,
 > `nvidia/qwen3.5-397b-a17b`, paid `nvidia/kimi-k2.5`) resolve via backend
 > redirects. `nvidia/deepseek-v4-pro`, `nvidia/deepseek-v3.2`, and
@@ -402,6 +405,48 @@ symbols, err := client.ListSymbols(ctx, blockrun.CategoryCrypto,
 Supported markets for `CategoryStocks`: `us, hk, jp, kr, gb, de, fr, nl,
 ie, lu, cn, ca`.
 
+## Multi-chain RPC
+
+`RPCClient` wraps `POST /v1/rpc/{network}` — standard JSON-RPC 2.0 access to
+40+ chains through one endpoint (Ethereum, Base, Solana, Polygon, BSC,
+Arbitrum, Optimism, Avalanche, Bitcoin, Sui, and more; powered by Tatum's RPC
+gateway). No API key, no per-chain endpoints: flat **$0.002 per call** in
+USDC; a JSON-RPC batch charges per element.
+
+```go
+rpcClient, err := blockrun.NewRPCClient("")
+
+// EVM chains speak eth_* JSON-RPC
+block, err := rpcClient.Call(ctx, "ethereum", "eth_blockNumber", nil)
+fmt.Println(string(block.Result)) // "0x1499f7c"
+
+balance, err := rpcClient.Call(ctx, "base", "eth_getBalance", []any{
+    "0x4200000000000000000000000000000000000006", "latest",
+})
+
+// Non-EVM chains speak their native JSON-RPC
+slot, err := rpcClient.Call(ctx, "solana", "getSlot", nil)
+tip, err := rpcClient.Call(ctx, "bitcoin", "getblockcount", nil)
+
+// Batch: one payment, per-element pricing ($0.002 x N)
+out, err := rpcClient.Batch(ctx, "polygon", []blockrun.RPCBatchRequest{
+    {Method: "eth_blockNumber"},
+    {Method: "eth_gasPrice"},
+})
+
+fmt.Println(block.Network)  // "ethereum" (canonical key from X-Network)
+fmt.Println(block.CacheHit) // true if served from the gateway's hot cache
+fmt.Println(block.TxHash)   // x402 settlement tx
+```
+
+40 curated chains are exported as `blockrun.RPCSupportedNetworks`; common
+aliases (`eth`, `arb`, `op`, `matic`, `bnb`, `avax`, `sol`, `btc`, `xrp`,
+`dot`, ...) resolve server-side (`blockrun.RPCNetworkAliases`). Unknown but
+well-formed slugs fall through to a generic `{slug}-mainnet` gateway attempt,
+so new chains work without an SDK update. Hot, low-volatility reads
+(`eth_chainId`, mined blocks/receipts, `getTransaction`, ...) are served from
+a method-aware gateway cache — same price, lower latency.
+
 ## Prediction Markets
 
 Access Polymarket, Kalshi, and more via Predexon.
@@ -545,6 +590,27 @@ result, err = videoClient.Generate(ctx, "the spokesperson presents the product",
     RealFaceAssetID: "ta_abcdef1234567890",
     Resolution:      "1080p",       // 360p / 480p / 720p / 1080p / 4K
     GenerateAudio:   &genAudio,     // *bool — nil defers to model default
+})
+
+// First-and-last-frame interpolation (Seedance only): the model tweens
+// from ImageURL (first frame) to LastFrameURL (final frame).
+// Priced identically to image-to-video.
+result, err = videoClient.Generate(ctx, "the flower blooms in golden morning light", &blockrun.VideoGenerateOptions{
+    Model:        "bytedance/seedance-1.5-pro",
+    ImageURL:     "https://example.com/bud.jpg",
+    LastFrameURL: "https://example.com/bloom.jpg",
+})
+
+// Omni / multi-reference (Seedance 2.0 only): up to 9 reference images
+// for character/style consistency. Cite them as "image 1", "image 2" in
+// the prompt. Mutually exclusive with ImageURL / LastFrameURL /
+// RealFaceAssetID.
+result, err = videoClient.Generate(ctx, "the character from image 1 walks through the city from image 2", &blockrun.VideoGenerateOptions{
+    Model: "bytedance/seedance-2.0",
+    ReferenceImageURLs: []string{
+        "https://example.com/character.jpg",
+        "https://example.com/city.jpg",
+    },
 })
 ```
 

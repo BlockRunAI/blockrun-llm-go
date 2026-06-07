@@ -2,6 +2,26 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.13.0
+
+Adds the new multi-chain RPC client, the 2026-06-02 Seedance video parameters, and rebuilds the free routing tier from a live sweep.
+
+- **`RPCClient` — multi-chain JSON-RPC (40+ chains) via x402.** New file `rpc.go` wraps the new backend `POST /v1/rpc/{network}` (Tatum gateway passthrough, launched 2026-06-07). Flat $0.002 per call; a JSON-RPC batch charges per element. API on `*RPCClient`:
+  - `Call(ctx, network, method, params)` — single JSON-RPC 2.0 call. EVM chains speak `eth_*`; non-EVM (Solana / Bitcoin-family / NEAR / Sui / XRP Ledger / Polkadot) speak their native JSON-RPC. `RPCResponse` carries the raw JSON-RPC envelope (`Result` as `json.RawMessage`, optional `*RPCError`) plus gateway metadata from response headers: `Network` (X-Network), `CacheHit` (X-Cache), `TxHash` (X-Payment-Receipt).
+  - `Batch(ctx, network, []RPCBatchRequest)` — JSON-RPC batch, priced per element; `jsonrpc` and missing ids are auto-filled.
+  - `RPCSupportedNetworks` (40 curated chains), `RPCNetworkAliases` (eth, arb, op, matic, bnb, avax, sol, btc, xrp, dot, ...), `RPCPriceUSD`. Unknown well-formed slugs fall through server-side to `{slug}-mainnet`, so new Tatum chains work without an SDK update.
+- **`VideoGenerateOptions` new Seedance fields** (backend 2026-06-02):
+  - `LastFrameURL` — first-and-last-frame interpolation: tweens from `ImageURL` (first frame) to `LastFrameURL` (final frame). Requires `ImageURL` + a Seedance model. Priced as image-to-video.
+  - `ReferenceImageURLs` — omni / multi-reference: up to 9 reference images for character/style consistency (Seedance 2.0 only); cite them as "image 1", "image 2" in the prompt. Mutually exclusive with `ImageURL` / `LastFrameURL` / `RealFaceAssetID`.
+  - token360 passthroughs that were already live upstream: `AspectRatio`, `Seed` (`*int`), `Watermark` (`*bool`), `ReturnLastFrame`.
+  - Client-side validation mirrors the backend mutual-exclusion rules.
+- **Free routing tier rebuilt from a 2026-06-07 live sweep** (every visible free model probed):
+  - `nvidia/qwen3-next-80b-a3b-thinking` hit NVIDIA end-of-life 2026-05-21 (HTTP 410) — dropped as Complex/Reasoning primary. Complex → `nvidia/qwen3-coder-480b` (871ms probe); Reasoning → `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` (681ms, explicit reasoning + vision).
+  - `nvidia/mistral-small-4-119b` is timing out upstream (3/3 probes >60s) — not routed.
+  - Simple → `nvidia/deepseek-v4-flash` (896ms probe, 1M context; recovered from the 05-09 NIM regression), replacing the privacy-encumbered `nvidia/gpt-oss-120b` default. Medium → `nvidia/llama-4-maverick`. The free table now matches the Python SDK's `FREE_TIERS`.
+- **`baseClient.doRequestHeaders` / `handlePaymentAndRetryHeaders`** — internal header-returning variants of the POST request path so clients can surface gateway metadata headers; the existing `doRequest` / `handlePaymentAndRetry` signatures delegate and are unchanged.
+- README: RPC section, new video examples, free-model tables refreshed (qwen3-next retired, mistral-small flagged).
+
 ## 0.12.0
 
 Adds BlockRun Voice (ElevenLabs TTS + sound effects) and syncs the model catalog with the 2026-06-04/05 backend changes.
