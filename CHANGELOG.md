@@ -2,6 +2,16 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.16.0
+
+- **`VideoClient.GenerateFromContent(ctx, content, opts)`** — submits a standard
+  Seedance `content[]` body to the gateway's `POST /v1/videos` endpoint
+  (validates unsupported inputs before charging, then delegates to the same
+  x402 pipeline as `Generate`). For migrating existing `content[]`-shaped
+  payloads unchanged; most callers should still prefer `Generate(ctx, prompt, opts)`
+  with structured options. Image inputs go inside the content items; only
+  `Model` and the scalar render fields are forwarded from `opts`.
+
 ## 0.15.0
 
 Backfills four endpoint families the Go SDK never covered, and fixes a payment bug in `PM()`.

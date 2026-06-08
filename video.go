@@ -274,3 +274,65 @@ func (c *VideoClient) Generate(ctx context.Context, prompt string, opts *VideoGe
 
 	return &videoResp, nil
 }
+
+// GenerateFromContent generates a video from a standard Seedance content[] body.
+//
+// It targets the gateway's POST /v1/videos endpoint, which accepts the
+// mainstream multimodal content array (text + a single reference image) used by
+// other Seedance APIs — so a caller already holding a content[]-shaped request
+// can submit it unchanged. The gateway validates unsupported inputs BEFORE
+// charging, then delegates to the same x402 pipeline as Generate.
+//
+// Most SDK users should prefer Generate (structured options like ImageURL /
+// LastFrameURL); this exists for migrating existing content[] payloads with no
+// reshaping. Image inputs belong inside the content items, not in opts — only
+// Model and the scalar render fields (Resolution, DurationSeconds, AspectRatio,
+// GenerateAudio, Seed, Watermark) are forwarded from opts.
+func (c *VideoClient) GenerateFromContent(ctx context.Context, content []map[string]any, opts *VideoGenerateOptions) (*VideoResponse, error) {
+	if len(content) == 0 {
+		return nil, &ValidationError{
+			Field:   "content",
+			Message: "content must be a non-empty list of Seedance content items",
+		}
+	}
+
+	body := map[string]any{
+		"content": content,
+	}
+
+	if opts != nil {
+		if opts.Model != "" {
+			body["model"] = opts.Model
+		}
+		if opts.DurationSeconds > 0 {
+			body["duration_seconds"] = opts.DurationSeconds
+		}
+		if opts.AspectRatio != "" {
+			body["aspect_ratio"] = opts.AspectRatio
+		}
+		if opts.Resolution != "" {
+			body["resolution"] = opts.Resolution
+		}
+		if opts.GenerateAudio != nil {
+			body["generate_audio"] = *opts.GenerateAudio
+		}
+		if opts.Seed != nil {
+			body["seed"] = *opts.Seed
+		}
+		if opts.Watermark != nil {
+			body["watermark"] = *opts.Watermark
+		}
+	}
+
+	respBytes, err := c.doRequest(ctx, "/v1/videos", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var videoResp VideoResponse
+	if err := json.Unmarshal(respBytes, &videoResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &videoResp, nil
+}
