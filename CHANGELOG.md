@@ -2,6 +2,19 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.16.1
+
+- **Fix: video generation now handles the async (202 + poll) gateway contract.**
+  `Generate` and `GenerateFromContent` previously POSTed to `/v1/videos[/generations]`
+  via `doRequest`, which treats any non-200 as an error — but the gateway returns
+  **202 `{ id, poll_url }`** on submit and settles only on a completed poll. The old
+  path errored on every successful submit (video generation never actually worked in
+  the Go SDK). Both methods now sign once, submit (accepting 202), then GET-poll
+  `poll_url` with the same wallet's `PAYMENT-SIGNATURE` until `status == completed`,
+  capturing the settlement receipt — mirroring the Python/TS SDKs. A caller who gives
+  up before completion is never charged (settlement is poll-time). Added tests that
+  exercise the real 402 → 202 → poll flow.
+
 ## 0.16.0
 
 - **`VideoClient.GenerateFromContent(ctx, content, opts)`** — submits a standard

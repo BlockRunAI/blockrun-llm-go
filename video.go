@@ -1,9 +1,11 @@
 package blockrun
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -20,16 +22,28 @@ const (
 	//   bytedance/seedance-2.0       $0.30/sec, 720p Pro
 	// The client passes Model through; no enum gating.
 
-	// DefaultVideoTimeout is the default timeout for video generation
-	// (video gen + polling can take up to 3 minutes).
+	// DefaultVideoTimeout is the default per-HTTP-call timeout (submit or a
+	// single poll). The overall generate budget is videoPollBudget.
 	DefaultVideoTimeout = 300 * time.Second
+
+	// videoPollInterval is the wait between poll attempts.
+	videoPollInterval = 5 * time.Second
+	// videoPollBudget is the overall wall-clock budget for submit + polling.
+	// If upstream runs past this, Generate returns without charging.
+	videoPollBudget = 300 * time.Second
+	// videoMaxTimeoutSeconds is the signed-auth window floor — bumped above the
+	// server default so the PAYMENT-SIGNATURE stays valid across the poll window.
+	videoMaxTimeoutSeconds = 600
 )
 
 // VideoClient is the BlockRun Video Generation client.
 //
 // Generates short AI videos via x402 micropayments on Base chain. The
-// client blocks until the video is ready because the gateway handles
-// async polling internally. Supports xAI Grok Imagine Video and
+// gateway is async (POST submit returns 202 { id, poll_url }); this client
+// signs once, submits, then polls poll_url with the same wallet's
+// PAYMENT-SIGNATURE until the job completes. Settlement happens on the first
+// completed poll, so a caller who gives up is never charged. Supports xAI
+// Grok Imagine Video and
 // ByteDance Seedance (1.5-pro / 2.0-fast / 2.0).
 //
 // Seedance 2.0 fast/pro additionally accept a RealFaceAssetID — a
@@ -45,6 +59,9 @@ const (
 // The key NEVER leaves your machine - only signatures are transmitted.
 type VideoClient struct {
 	*baseClient
+	// pollInterval is the wait between poll attempts. Defaults to
+	// videoPollInterval; overridable (mainly for tests).
+	pollInterval time.Duration
 }
 
 // VideoClientOption is a function that configures a VideoClient.
@@ -81,7 +98,7 @@ func NewVideoClient(privateKey string, opts ...VideoClientOption) (*VideoClient,
 		return nil, err
 	}
 
-	client := &VideoClient{baseClient: bc}
+	client := &VideoClient{baseClient: bc, pollInterval: videoPollInterval}
 
 	for _, opt := range opts {
 		opt(client)
@@ -262,17 +279,7 @@ func (c *VideoClient) Generate(ctx context.Context, prompt string, opts *VideoGe
 		}
 	}
 
-	respBytes, err := c.doRequest(ctx, "/v1/videos/generations", body)
-	if err != nil {
-		return nil, err
-	}
-
-	var videoResp VideoResponse
-	if err := json.Unmarshal(respBytes, &videoResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &videoResp, nil
+	return c.submitVideoAndPoll(ctx, "/v1/videos/generations", body)
 }
 
 // GenerateFromContent generates a video from a standard Seedance content[] body.
@@ -324,15 +331,225 @@ func (c *VideoClient) GenerateFromContent(ctx context.Context, content []map[str
 		}
 	}
 
-	respBytes, err := c.doRequest(ctx, "/v1/videos", body)
+	return c.submitVideoAndPoll(ctx, "/v1/videos", body)
+}
+
+// submitVideoAndPoll runs the async video pipeline shared by Generate and
+// GenerateFromContent: POST submit (402 -> sign -> 202 { id, poll_url }), then
+// GET-poll poll_url with the same wallet's PAYMENT-SIGNATURE until the job
+// reaches "completed". The gateway settles only on the first completed poll, so
+// upstream failure or a caller giving up costs nothing.
+func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string, body map[string]any) (*VideoResponse, error) {
+	submitURL := c.apiURL + submitPath
+
+	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to encode request body: %w", err)
 	}
 
-	var videoResp VideoResponse
-	if err := json.Unmarshal(respBytes, &videoResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	// Step 1: unauth POST -> 402 with payment requirements.
+	req1, err := http.NewRequestWithContext(ctx, "POST", submitURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req1.Header.Set("Content-Type", "application/json")
+	resp1, err := c.httpClient.Do(req1)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	paymentHeader := resp1.Header.Get("payment-required")
+	body1, _ := io.ReadAll(resp1.Body)
+	resp1.Body.Close()
+
+	if resp1.StatusCode != http.StatusPaymentRequired {
+		return nil, &APIError{
+			StatusCode: resp1.StatusCode,
+			Message:    fmt.Sprintf("expected 402 on video submit, got %d: %s", resp1.StatusCode, string(body1)),
+		}
+	}
+	if paymentHeader == "" {
+		return nil, &PaymentError{Message: "402 response but no payment requirements found"}
 	}
 
-	return &videoResp, nil
+	// Step 2: sign the payment authorization.
+	paymentReq, err := ParsePaymentRequired(paymentHeader)
+	if err != nil {
+		return nil, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
+	}
+	paymentOption, err := ExtractPaymentDetails(paymentReq)
+	if err != nil {
+		return nil, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
+	}
+	resourceURL := paymentReq.Resource.URL
+	if resourceURL == "" {
+		resourceURL = submitURL
+	}
+	maxTimeout := paymentOption.MaxTimeoutSeconds
+	if maxTimeout < videoMaxTimeoutSeconds {
+		maxTimeout = videoMaxTimeoutSeconds
+	}
+	paymentPayload, err := CreatePaymentPayload(
+		c.privateKey,
+		paymentOption.PayTo,
+		paymentOption.Amount,
+		paymentOption.Network,
+		resourceURL,
+		paymentReq.Resource.Description,
+		maxTimeout,
+		paymentOption.Extra,
+		paymentReq.Extensions,
+	)
+	if err != nil {
+		return nil, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
+	}
+
+	// Step 3: submit with payment -> 202 { id, poll_url }.
+	req2, err := http.NewRequestWithContext(ctx, "POST", submitURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create submit request: %w", err)
+	}
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("PAYMENT-SIGNATURE", paymentPayload)
+	resp2, err := c.httpClient.Do(req2)
+	if err != nil {
+		return nil, fmt.Errorf("submit request failed: %w", err)
+	}
+	body2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+
+	if resp2.StatusCode == http.StatusPaymentRequired {
+		return nil, &PaymentError{Message: "Payment was rejected. Check your wallet balance."}
+	}
+	if resp2.StatusCode != http.StatusOK && resp2.StatusCode != http.StatusAccepted {
+		return nil, &APIError{
+			StatusCode: resp2.StatusCode,
+			Message:    fmt.Sprintf("Submit failed: %s", string(body2)),
+		}
+	}
+
+	var submitData struct {
+		ID      string `json:"id"`
+		PollURL string `json:"poll_url"`
+		Status  string `json:"status"`
+	}
+	if err := json.Unmarshal(body2, &submitData); err != nil {
+		return nil, fmt.Errorf("failed to decode submit response: %w", err)
+	}
+	if submitData.ID == "" || submitData.PollURL == "" {
+		return nil, &APIError{
+			StatusCode: resp2.StatusCode,
+			Message:    fmt.Sprintf("submit response missing id/poll_url: %s", string(body2)),
+		}
+	}
+
+	pollURL := c.absoluteURL(submitData.PollURL)
+
+	// Step 4: poll with the same PAYMENT-SIGNATURE until completed.
+	deadline := time.Now().Add(videoPollBudget)
+	lastStatus := submitData.Status
+	if lastStatus == "" {
+		lastStatus = "queued"
+	}
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(c.pollInterval):
+		}
+
+		pollReq, err := http.NewRequestWithContext(ctx, "GET", pollURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create poll request: %w", err)
+		}
+		pollReq.Header.Set("PAYMENT-SIGNATURE", paymentPayload)
+		pollResp, err := c.httpClient.Do(pollReq)
+		if err != nil {
+			return nil, fmt.Errorf("poll request failed: %w", err)
+		}
+		pollBytes, _ := io.ReadAll(pollResp.Body)
+		pollResp.Body.Close()
+
+		var pollData map[string]any
+		_ = json.Unmarshal(pollBytes, &pollData)
+		if s, ok := pollData["status"].(string); ok && s != "" {
+			lastStatus = s
+		}
+
+		if pollResp.StatusCode == http.StatusAccepted && (lastStatus == "queued" || lastStatus == "in_progress") {
+			continue
+		}
+		if lastStatus == "failed" {
+			return nil, &APIError{
+				StatusCode: pollResp.StatusCode,
+				Message:    fmt.Sprintf("Upstream generation failed: %s", string(pollBytes)),
+			}
+		}
+		if pollResp.StatusCode == http.StatusOK && lastStatus == "completed" {
+			var videoResp VideoResponse
+			if err := json.Unmarshal(pollBytes, &videoResp); err != nil {
+				return nil, fmt.Errorf("failed to decode response: %w", err)
+			}
+			if tx := pollResp.Header.Get("x-payment-receipt"); tx != "" {
+				videoResp.TxHash = tx
+			}
+			c.recordVideoCost(paymentOption.Amount, submitPath)
+			return &videoResp, nil
+		}
+		// 504 on a poll = transient upstream hiccup; keep polling. Any other
+		// non-2xx is a hard failure.
+		if pollResp.StatusCode != http.StatusOK &&
+			pollResp.StatusCode != http.StatusAccepted &&
+			pollResp.StatusCode != http.StatusGatewayTimeout {
+			return nil, &APIError{
+				StatusCode: pollResp.StatusCode,
+				Message:    fmt.Sprintf("Poll failed: %s", string(pollBytes)),
+			}
+		}
+	}
+
+	return nil, &APIError{
+		StatusCode: http.StatusGatewayTimeout,
+		Message: fmt.Sprintf(
+			"Video generation did not complete within %.0fs (last status: %s). No payment was taken.",
+			videoPollBudget.Seconds(), lastStatus,
+		),
+	}
+}
+
+// absoluteURL resolves a server-supplied relative poll_url against the API host.
+// poll_url comes back as "/api/v1/videos/<id>"; apiURL already ends in "/api",
+// so strip that once to avoid "/api/api/...".
+func (c *VideoClient) absoluteURL(u string) string {
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return u
+	}
+	base := c.apiURL
+	if strings.HasSuffix(base, "/api") {
+		base = strings.TrimSuffix(base, "/api")
+	}
+	return base + u
+}
+
+// recordVideoCost tracks spending for a completed video job, mirroring the
+// accounting baseClient does for synchronous paid calls.
+func (c *VideoClient) recordVideoCost(amount, submitPath string) {
+	var costUSD float64
+	if amount != "" {
+		var amountMicro float64
+		if _, err := fmt.Sscanf(amount, "%f", &amountMicro); err == nil {
+			costUSD = amountMicro / 1_000_000
+		}
+	}
+
+	c.mu.Lock()
+	c.sessionCalls++
+	if costUSD > 0 {
+		c.sessionTotalUSD += costUSD
+	}
+	c.mu.Unlock()
+
+	if c.costLog != nil && costUSD > 0 {
+		c.costLog.Append(submitPath, costUSD)
+	}
 }

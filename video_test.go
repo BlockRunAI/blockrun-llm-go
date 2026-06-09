@@ -2,12 +2,70 @@ package blockrun
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"time"
 )
+
+// newMockVideoServer emulates the real async video pipeline: 402 on the unauth
+// submit, 202 { id, poll_url } on the paid submit (capturing the request body
+// into sawBody), and a completed job on the poll GET. This is the contract the
+// gateway actually serves — submit returns 202, settlement happens on the poll.
+func newMockVideoServer(t *testing.T, sawBody *map[string]any, model string) *httptest.Server {
+	t.Helper()
+	pr := PaymentRequirement{
+		X402Version: 2,
+		Accepts: []PaymentOption{{
+			Scheme:            "exact",
+			Network:           "eip155:8453",
+			Amount:            "1000",
+			Asset:             USDCBase,
+			PayTo:             "0x1234567890123456789012345678901234567890",
+			MaxTimeoutSeconds: 300,
+		}},
+		Resource: ResourceInfo{
+			URL:         "https://blockrun.ai/api/v1/videos/generations",
+			Description: "Video",
+		},
+	}
+	prJSON, _ := json.Marshal(pr)
+	prHeader := base64.StdEncoding.EncodeToString(prJSON)
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Poll GET -> completed job.
+		if r.Method == http.MethodGet {
+			w.Header().Set("x-payment-receipt", "0xdeadbeef")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  "completed",
+				"created": 1749000000,
+				"model":   model,
+				"data": []map[string]any{
+					{"url": "https://cdn.example.com/v.mp4", "duration_seconds": 5},
+				},
+			})
+			return
+		}
+		// Unauth submit -> 402 with payment requirements.
+		if r.Header.Get("PAYMENT-SIGNATURE") == "" {
+			w.Header().Set("payment-required", prHeader)
+			w.WriteHeader(http.StatusPaymentRequired)
+			return
+		}
+		// Paid submit -> 202 { id, poll_url }. Capture the body for assertions.
+		if err := json.NewDecoder(r.Body).Decode(sawBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":       "job123",
+			"poll_url": "http://" + r.Host + "/v1/videos/generations/job123",
+			"status":   "queued",
+		})
+	}))
+}
 
 func TestNewVideoClient_RequiresKey(t *testing.T) {
 	t.Setenv("BLOCKRUN_WALLET_KEY", "")
@@ -43,24 +101,11 @@ func TestVideoClient_GenerateValidation(t *testing.T) {
 
 func TestVideoClient_GenerateWithFaceAsset(t *testing.T) {
 	var sawBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/videos/generations") {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&sawBody); err != nil {
-			t.Fatalf("decode body: %v", err)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"created": 1717000000,
-			"model":   "bytedance/seedance-2.0",
-			"data": []map[string]any{
-				{"url": "https://cdn.example.com/v.mp4", "duration_seconds": 5},
-			},
-		})
-	}))
+	server := newMockVideoServer(t, &sawBody, "bytedance/seedance-2.0")
 	defer server.Close()
 
 	c, _ := NewVideoClient(testPrivateKey, WithVideoAPIURL(server.URL))
+	c.pollInterval = time.Millisecond
 	genAudio := false
 	out, err := c.Generate(context.Background(), "the character waves", &VideoGenerateOptions{
 		Model:           "bytedance/seedance-2.0",
@@ -140,21 +185,11 @@ func TestVideoClient_GenerateNewParamValidation(t *testing.T) {
 
 func TestVideoClient_GenerateFirstLastFrame(t *testing.T) {
 	var sawBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&sawBody); err != nil {
-			t.Fatalf("decode body: %v", err)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"created": 1749000000,
-			"model":   "bytedance/seedance-1.5-pro",
-			"data": []map[string]any{
-				{"url": "https://cdn.example.com/v.mp4", "duration_seconds": 5},
-			},
-		})
-	}))
+	server := newMockVideoServer(t, &sawBody, "bytedance/seedance-1.5-pro")
 	defer server.Close()
 
 	c, _ := NewVideoClient(testPrivateKey, WithVideoAPIURL(server.URL))
+	c.pollInterval = time.Millisecond
 	seed := 42
 	watermark := false
 	_, err := c.Generate(context.Background(), "the flower blooms", &VideoGenerateOptions{
@@ -191,21 +226,11 @@ func TestVideoClient_GenerateFirstLastFrame(t *testing.T) {
 
 func TestVideoClient_GenerateReferenceImages(t *testing.T) {
 	var sawBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&sawBody); err != nil {
-			t.Fatalf("decode body: %v", err)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"created": 1749000000,
-			"model":   "bytedance/seedance-2.0",
-			"data": []map[string]any{
-				{"url": "https://cdn.example.com/v.mp4", "duration_seconds": 5},
-			},
-		})
-	}))
+	server := newMockVideoServer(t, &sawBody, "bytedance/seedance-2.0")
 	defer server.Close()
 
 	c, _ := NewVideoClient(testPrivateKey, WithVideoAPIURL(server.URL))
+	c.pollInterval = time.Millisecond
 	_, err := c.Generate(context.Background(), "the character from image 1 in the city from image 2", &VideoGenerateOptions{
 		Model: "bytedance/seedance-2.0",
 		ReferenceImageURLs: []string{
@@ -222,5 +247,65 @@ func TestVideoClient_GenerateReferenceImages(t *testing.T) {
 	}
 	if _, present := sawBody["image_url"]; present {
 		t.Errorf("did not expect image_url, got %v", sawBody["image_url"])
+	}
+}
+
+func TestVideoClient_GenerateFromContent(t *testing.T) {
+	var sawBody map[string]any
+	server := newMockVideoServer(t, &sawBody, "bytedance/seedance-2.0")
+	defer server.Close()
+
+	c, _ := NewVideoClient(testPrivateKey, WithVideoAPIURL(server.URL))
+	c.pollInterval = time.Millisecond
+
+	out, err := c.GenerateFromContent(
+		context.Background(),
+		[]map[string]any{
+			{"type": "text", "text": "a red apple spinning"},
+		},
+		&VideoGenerateOptions{
+			Model:           "bytedance/seedance-2.0",
+			Resolution:      "720p",
+			DurationSeconds: 5,
+		},
+	)
+	if err != nil {
+		t.Fatalf("GenerateFromContent: %v", err)
+	}
+	if len(out.Data) != 1 || out.Data[0].URL != "https://cdn.example.com/v.mp4" {
+		t.Fatalf("unexpected response: %+v", out)
+	}
+	if out.TxHash != "0xdeadbeef" {
+		t.Errorf("txHash = %q, want the settlement receipt from the completed poll", out.TxHash)
+	}
+
+	// content[] is forwarded verbatim to POST /v1/videos.
+	content, ok := sawBody["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("content = %v", sawBody["content"])
+	}
+	first, _ := content[0].(map[string]any)
+	if first["type"] != "text" || first["text"] != "a red apple spinning" {
+		t.Errorf("content[0] = %v", content[0])
+	}
+	// Scalar render options forwarded as snake_case.
+	if sawBody["model"] != "bytedance/seedance-2.0" {
+		t.Errorf("model = %v", sawBody["model"])
+	}
+	if sawBody["resolution"] != "720p" {
+		t.Errorf("resolution = %v", sawBody["resolution"])
+	}
+	if sawBody["duration_seconds"] != float64(5) {
+		t.Errorf("duration_seconds = %v", sawBody["duration_seconds"])
+	}
+}
+
+func TestVideoClient_GenerateFromContentRejectsEmpty(t *testing.T) {
+	c, err := NewVideoClient(testPrivateKey)
+	if err != nil {
+		t.Fatalf("NewVideoClient: %v", err)
+	}
+	if _, err := c.GenerateFromContent(context.Background(), nil, nil); err == nil {
+		t.Error("expected error for empty content")
 	}
 }
