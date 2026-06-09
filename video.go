@@ -485,7 +485,14 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 				Message:    fmt.Sprintf("Upstream generation failed: %s", string(pollBytes)),
 			}
 		}
-		if pollResp.StatusCode == http.StatusOK && lastStatus == "completed" {
+		// Terminal success is keyed on status, NOT the HTTP code — the gateway
+		// settles on-chain the moment a poll reports "completed", so coupling
+		// success to a literal 200 would spin to the deadline (and return a
+		// "not charged" error) on a completed-but-non-200 poll, even though the
+		// caller was already charged. Record the cost as soon as completion is
+		// observed (the charge is irreversible at that point), then decode.
+		if lastStatus == "completed" {
+			c.recordVideoCost(paymentOption.Amount, submitPath)
 			var videoResp VideoResponse
 			if err := json.Unmarshal(pollBytes, &videoResp); err != nil {
 				return nil, fmt.Errorf("failed to decode response: %w", err)
@@ -493,7 +500,6 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 			if tx := pollResp.Header.Get("x-payment-receipt"); tx != "" {
 				videoResp.TxHash = tx
 			}
-			c.recordVideoCost(paymentOption.Amount, submitPath)
 			return &videoResp, nil
 		}
 		// 504 on a poll = transient upstream hiccup; keep polling. Any other

@@ -2,6 +2,16 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.16.2
+
+- **Harden video poll: terminal success is keyed on `status=="completed"`, not a
+  literal HTTP 200.** The gateway settles on-chain the moment a poll reports
+  completed; coupling success to a 200 meant a completed-but-non-200 poll would
+  spin to the deadline and return a "not charged" error even though the caller
+  was already charged. Cost is now recorded as soon as completion is observed
+  (the charge is irreversible at that point), then the payload is decoded. Added
+  a test that returns a completed payload with a 202.
+
 ## 0.16.1
 
 - **Fix: video generation now handles the async (202 + poll) gateway contract.**

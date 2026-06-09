@@ -309,3 +309,57 @@ func TestVideoClient_GenerateFromContentRejectsEmpty(t *testing.T) {
 		t.Error("expected error for empty content")
 	}
 }
+
+// TestVideoClient_PollCompletedNon200 pins the fix that terminal success is
+// keyed on status=="completed", NOT a literal HTTP 200. A poll that reports
+// completed with a 202 must still succeed (the gateway has already settled),
+// not spin to the deadline and return a "not charged" error.
+func TestVideoClient_PollCompletedNon200(t *testing.T) {
+	pr := PaymentRequirement{
+		X402Version: 2,
+		Accepts: []PaymentOption{{
+			Scheme: "exact", Network: "eip155:8453", Amount: "1000",
+			Asset: USDCBase, PayTo: "0x1234567890123456789012345678901234567890",
+			MaxTimeoutSeconds: 300,
+		}},
+		Resource: ResourceInfo{URL: "https://blockrun.ai/api/v1/videos/generations"},
+	}
+	prJSON, _ := json.Marshal(pr)
+	prHeader := base64.StdEncoding.EncodeToString(prJSON)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			// Completed payload returned with a 202, not a 200.
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "completed",
+				"model":  "bytedance/seedance-2.0",
+				"data":   []map[string]any{{"url": "https://cdn.example.com/v.mp4"}},
+			})
+			return
+		}
+		if r.Header.Get("PAYMENT-SIGNATURE") == "" {
+			w.Header().Set("payment-required", prHeader)
+			w.WriteHeader(http.StatusPaymentRequired)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":       "job123",
+			"poll_url": "http://" + r.Host + "/v1/videos/generations/job123",
+			"status":   "queued",
+		})
+	}))
+	defer server.Close()
+
+	c, _ := NewVideoClient(testPrivateKey, WithVideoAPIURL(server.URL))
+	c.pollInterval = time.Millisecond
+
+	out, err := c.Generate(context.Background(), "a red apple", &VideoGenerateOptions{Model: "bytedance/seedance-2.0"})
+	if err != nil {
+		t.Fatalf("expected success on 202+completed, got error: %v", err)
+	}
+	if len(out.Data) != 1 || out.Data[0].URL != "https://cdn.example.com/v.mp4" {
+		t.Fatalf("unexpected response: %+v", out)
+	}
+}
