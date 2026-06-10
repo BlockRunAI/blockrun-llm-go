@@ -2,10 +2,12 @@ package blockrun
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestNewImageClient(t *testing.T) {
@@ -183,5 +185,146 @@ func TestImageClientGetSpending(t *testing.T) {
 	}
 	if spending.Calls != 0 {
 		t.Errorf("Expected initial Calls 0, got %d", spending.Calls)
+	}
+}
+
+// newMockAsyncImageServer emulates the gateway's hybrid image pipeline slow
+// path: 402 on the unauth submit, 202 { id, poll_url } on the paid submit,
+// then in_progress → completed on successive poll GETs. This is the contract
+// the gateway actually serves for slow models (e.g. gpt-image-2) — settlement
+// happens on the first completed poll, not at submit.
+func newMockAsyncImageServer(t *testing.T, pollsBeforeDone int) *httptest.Server {
+	t.Helper()
+	pr := PaymentRequirement{
+		X402Version: 2,
+		Accepts: []PaymentOption{{
+			Scheme:            "exact",
+			Network:           "eip155:8453",
+			Amount:            "40000",
+			Asset:             USDCBase,
+			PayTo:             "0x1234567890123456789012345678901234567890",
+			MaxTimeoutSeconds: 600,
+		}},
+		Resource: ResourceInfo{
+			URL:         "https://blockrun.ai/api/v1/images/generations",
+			Description: "Image",
+		},
+	}
+	prJSON, _ := json.Marshal(pr)
+	prHeader := base64.StdEncoding.EncodeToString(prJSON)
+
+	polls := 0
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if r.Header.Get("PAYMENT-SIGNATURE") == "" {
+				t.Error("poll GET missing PAYMENT-SIGNATURE")
+			}
+			polls++
+			if polls <= pollsBeforeDone {
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": "img_job1", "status": "in_progress",
+				})
+				return
+			}
+			w.Header().Set("x-payment-receipt", "0xfeedface")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":      "img_job1",
+				"status":  "completed",
+				"created": 1749000000,
+				"data": []map[string]any{
+					{"url": "https://cdn.example.com/img.png", "backed_up": true},
+				},
+			})
+			return
+		}
+		if r.Header.Get("PAYMENT-SIGNATURE") == "" {
+			w.Header().Set("payment-required", prHeader)
+			w.WriteHeader(http.StatusPaymentRequired)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":       "img_job1",
+			"status":   "queued",
+			"poll_url": "http://" + r.Host + "/v1/images/generations/img_job1",
+		})
+	}))
+}
+
+func TestImageClientGenerateAsyncEnvelope(t *testing.T) {
+	server := newMockAsyncImageServer(t, 2)
+	defer server.Close()
+
+	client, err := NewImageClient(testPrivateKey, WithImageAPIURL(server.URL))
+	if err != nil {
+		t.Fatalf("NewImageClient: %v", err)
+	}
+	client.pollInterval = 10 * time.Millisecond
+
+	resp, err := client.Generate(context.Background(), "slow masterpiece", &ImageGenerateOptions{
+		Model: "openai/gpt-image-2",
+	})
+	if err != nil {
+		t.Fatalf("Generate via async envelope: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].URL != "https://cdn.example.com/img.png" {
+		t.Errorf("unexpected data: %+v", resp.Data)
+	}
+	if resp.TxHash != "0xfeedface" {
+		t.Errorf("expected settlement receipt 0xfeedface, got %q", resp.TxHash)
+	}
+	// Cost is recorded once completion is observed (40000 micro-USDC = $0.04).
+	if got := client.GetSpending().TotalUSD; got != 0.04 {
+		t.Errorf("expected $0.04 recorded, got %f", got)
+	}
+}
+
+func TestImageClientGenerateAsyncFailedNotCharged(t *testing.T) {
+	pr := PaymentRequirement{
+		X402Version: 2,
+		Accepts: []PaymentOption{{
+			Scheme: "exact", Network: "eip155:8453", Amount: "40000",
+			Asset: USDCBase, PayTo: "0x1234567890123456789012345678901234567890",
+			MaxTimeoutSeconds: 600,
+		}},
+		Resource: ResourceInfo{URL: "https://blockrun.ai/api/v1/images/generations", Description: "Image"},
+	}
+	prJSON, _ := json.Marshal(pr)
+	prHeader := base64.StdEncoding.EncodeToString(prJSON)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "img_job1", "status": "failed", "error": "upstream exploded",
+				"payment_status": "not_charged",
+			})
+			return
+		}
+		if r.Header.Get("PAYMENT-SIGNATURE") == "" {
+			w.Header().Set("payment-required", prHeader)
+			w.WriteHeader(http.StatusPaymentRequired)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "img_job1", "status": "queued",
+			"poll_url": "http://" + r.Host + "/v1/images/generations/img_job1",
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewImageClient(testPrivateKey, WithImageAPIURL(server.URL))
+	if err != nil {
+		t.Fatalf("NewImageClient: %v", err)
+	}
+	client.pollInterval = 10 * time.Millisecond
+
+	_, err = client.Generate(context.Background(), "doomed", &ImageGenerateOptions{Model: "openai/gpt-image-2"})
+	if err == nil {
+		t.Fatal("expected error for failed job")
+	}
+	if got := client.GetSpending().TotalUSD; got != 0 {
+		t.Errorf("failed job must not record spending, got %f", got)
 	}
 }

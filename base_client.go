@@ -491,3 +491,42 @@ func (bc *baseClient) handlePaymentAndRetryHeaders(ctx context.Context, url stri
 
 	return respBytes, retryResp.Header, nil
 }
+
+// recordSettledCost tracks spending for a paid call whose settlement happens
+// outside handlePaymentAndRetryHeaders — the async submit→poll flows (video,
+// slow-path images), which charge only once a poll observes "completed". It
+// mirrors the session accounting and JSONL cost log of the synchronous path.
+func (bc *baseClient) recordSettledCost(amount, endpoint string) {
+	var costUSD float64
+	if amount != "" {
+		var amountMicro float64
+		if _, err := fmt.Sscanf(amount, "%f", &amountMicro); err == nil {
+			costUSD = amountMicro / 1_000_000
+		}
+	}
+
+	bc.mu.Lock()
+	bc.sessionCalls++
+	if costUSD > 0 {
+		bc.sessionTotalUSD += costUSD
+	}
+	bc.mu.Unlock()
+
+	if bc.costLog != nil && costUSD > 0 {
+		bc.costLog.Append(endpoint, costUSD)
+	}
+}
+
+// resolvePollURL resolves a server-supplied relative poll_url against the API
+// host. poll_url comes back as "/api/v1/...": apiURL already ends in "/api",
+// so strip that once to avoid "/api/api/...".
+func (bc *baseClient) resolvePollURL(u string) string {
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return u
+	}
+	base := bc.apiURL
+	if strings.HasSuffix(base, "/api") {
+		base = strings.TrimSuffix(base, "/api")
+	}
+	return base + u
+}

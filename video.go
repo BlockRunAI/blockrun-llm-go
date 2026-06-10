@@ -524,38 +524,12 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 }
 
 // absoluteURL resolves a server-supplied relative poll_url against the API host.
-// poll_url comes back as "/api/v1/videos/<id>"; apiURL already ends in "/api",
-// so strip that once to avoid "/api/api/...".
 func (c *VideoClient) absoluteURL(u string) string {
-	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
-		return u
-	}
-	base := c.apiURL
-	if strings.HasSuffix(base, "/api") {
-		base = strings.TrimSuffix(base, "/api")
-	}
-	return base + u
+	return c.resolvePollURL(u)
 }
 
 // recordVideoCost tracks spending for a completed video job, mirroring the
 // accounting baseClient does for synchronous paid calls.
 func (c *VideoClient) recordVideoCost(amount, submitPath string) {
-	var costUSD float64
-	if amount != "" {
-		var amountMicro float64
-		if _, err := fmt.Sscanf(amount, "%f", &amountMicro); err == nil {
-			costUSD = amountMicro / 1_000_000
-		}
-	}
-
-	c.mu.Lock()
-	c.sessionCalls++
-	if costUSD > 0 {
-		c.sessionTotalUSD += costUSD
-	}
-	c.mu.Unlock()
-
-	if c.costLog != nil && costUSD > 0 {
-		c.costLog.Append(submitPath, costUSD)
-	}
+	c.recordSettledCost(amount, submitPath)
 }
