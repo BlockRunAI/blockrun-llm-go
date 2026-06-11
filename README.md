@@ -76,15 +76,52 @@ fmt.Println(result.Response) // "4"
 
 > Retired: `nvidia/qwen3-next-80b-a3b-thinking` hit NVIDIA end-of-life 2026-05-21 (HTTP 410). The gateway auto-redirects pinned callers to `nvidia/llama-4-maverick`.
 
-## How It Works
+## How Payment Works
 
-1. You send a request to BlockRun's API
-2. The API returns a 402 Payment Required with the price
-3. The SDK signs a USDC payment on Base locally (EIP-712 typed data)
-4. The request is retried with the payment proof
-5. You receive the response
+No API keys, no subscription, no invoices. You hold USDC on Base in your own
+wallet, and **each request pays for itself** with an on-chain micropayment. Two
+phases: fund the wallet once, then every call settles automatically.
 
-**Your private key never leaves your machine** — only signatures are transmitted.
+### 1. Fund your wallet once (get USDC on Base)
+
+The wallet you pass to `NewLLMClient` (private key, via `BASE_CHAIN_WALLET_KEY`)
+must hold a little **USDC on Base**. Three ways to get it there:
+
+- **Buy with a card** — mint a Coinbase Onramp link and pay with card/bank
+  (60+ fiat currencies). This is **free** (you're only funding your own wallet):
+
+  ```go
+  res, _ := client.Onramp(ctx, client.GetWalletAddress())
+  fmt.Println("Buy USDC:", res.URL) // open https://pay.coinbase.com/... and pay
+  ```
+
+- **Transfer USDC** you already hold to your wallet address (`client.GetWalletAddress()`) on **Base** — make sure it's Base USDC, not another chain.
+- **Skip funding entirely** — call the [free NVIDIA models](#try-it-free-no-usdc-required); they cost $0 and need no balance.
+
+$5 of USDC covers thousands of paid-model requests. Check your balance anytime
+with `client.GetBalance(ctx)`.
+
+### 2. Every request pays itself (automatic x402)
+
+You never call a "pay" function for inference — the SDK does it inline on each request:
+
+1. You call e.g. `client.Chat(ctx, model, prompt)`.
+2. The gateway replies **`402 Payment Required`** with the exact price for that call.
+3. The SDK signs a USDC payment on Base **locally** (EIP-712 typed data) for that amount.
+4. It retries the request with the signed payment proof attached.
+5. The gateway settles the payment on-chain and returns your response.
+
+All of this happens in one method call — you just get the response back (or a
+`*PaymentError` if the wallet is underfunded).
+
+### What it costs & how to verify
+
+- **Per call, pay-as-you-go.** Price is set per endpoint/model (see [Available Models](#available-models)); free NVIDIA models settle $0.
+- **Track it.** `client.GetSpending()` returns this session's total USD + call count; a JSONL cost log persists across runs (see [Cost Tracking](#cost-tracking)).
+- **Verify on-chain.** Settlements are real USDC transfers on Base — auditable on [Basescan](https://basescan.org).
+
+**Your private key never leaves your machine** — it only signs payments locally;
+only the signature is transmitted. BlockRun is non-custodial and never holds your funds.
 
 ## Features
 
