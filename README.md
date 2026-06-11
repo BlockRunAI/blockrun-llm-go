@@ -110,12 +110,14 @@ fmt.Println(result.Response) // "4"
 | **Response Caching** | Local cache with per-endpoint TTL |
 | **Cost Tracking** | Session spending + persistent JSONL log |
 | **Balance Checking** | Query USDC balance via Base chain RPC |
+| **Fund Wallet** | One-time Coinbase Onramp link — buy USDC with a card (Base only) |
 | **Agent Wallet Setup** | Auto-create wallets for autonomous agents |
 
 ## Anthropic Client
 
 Use the native Anthropic Messages API format with BlockRun's x402 payment gateway.
 Works with Claude models and any other BlockRun model (OpenAI, Google, etc.) via Anthropic message format.
+Pass any model ID — e.g. `claude-fable-5` (Mythos-class, above Opus), `claude-opus-4-8`, or `claude-sonnet-4-6`.
 
 ```go
 client, err := blockrun.NewAnthropicClient("")  // uses BLOCKRUN_WALLET_KEY env var
@@ -812,6 +814,22 @@ fmt.Printf("USDC balance: $%.2f\n", balance)
 balance, err := client.GetBalanceTestnet(ctx)
 ```
 
+## Fund Wallet (Coinbase Onramp)
+
+Mint a one-time Coinbase Onramp link to top up your wallet with a card or bank
+(60+ fiat currencies → Base USDC). It's **free** — the x402 signature only
+authenticates the wallet, so the funding address must match the signing wallet.
+The link is single-use and expires in ~5 minutes, so open it immediately and
+never cache it. **Base / USDC only.**
+
+```go
+res, err := client.Onramp(ctx, client.GetWalletAddress())
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println("Buy USDC:", res.URL) // https://pay.coinbase.com/...
+```
+
 ## Agent Wallet Setup
 
 For autonomous agents that need their own wallet:
@@ -836,7 +854,7 @@ for _, w := range wallets {
 | Provider | Models | Input $/M | Output $/M |
 |----------|--------|-----------|------------|
 | **OpenAI** | GPT-5.5, GPT-5.4, GPT-5.2, GPT-5.2 Codex, GPT-5 Mini, GPT-4o, GPT-4o-mini | $0.05–$30.00 | $0.40–$180.00 |
-| **Anthropic** | Claude Opus 4.8, Claude Sonnet 4.6, Claude Haiku 4.5 | $1.00–$5.00 | $5.00–$25.00 |
+| **Anthropic** | Claude Fable 5 (Mythos-class, 1M ctx, always-on thinking), Claude Opus 4.8, Claude Sonnet 4.6, Claude Haiku 4.5 | $1.00–$10.00 | $5.00–$50.00 |
 | **Google** | Gemini 3.5 Flash (thinking), Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash | $0.10–$2.00 | $0.40–$12.00 |
 | **xAI** | Grok 4.3 (1M, reasoning + vision), Grok Build 0.1 (256K, agentic coding) | $1.50 | $3.00–$4.00 |
 | **DeepSeek** | DeepSeek V4 Pro, DeepSeek Chat, DeepSeek Reasoner | $0.20–$0.435 | $0.40–$0.87 |

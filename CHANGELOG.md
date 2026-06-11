@@ -2,6 +2,38 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.18.0
+
+- **`LLMClient.Onramp(ctx, address)`** — mint a one-time Coinbase Onramp link to
+  fund a wallet with a card or bank (60+ fiat currencies → Base USDC). POSTs to
+  the gateway's `/v1/onramp/token`; the gateway holds the CDP key, signs the JWT,
+  and mints a single-use `sessionToken` (Coinbase Secure Init). Funding your own
+  wallet is **free** — the x402 signature only authenticates the wallet, so the
+  funding `address` must match the signing wallet. The returned
+  `https://pay.coinbase.com/...` URL is single-use and expires in ~5 minutes, so
+  mint it at click time and never cache it; the client validates the host before
+  returning. **Base / USDC only.** Mirrors the brcc CLI onramp client.
+- **Docs: Claude Fable 5** (`claude-fable-5`) — Anthropic's Mythos-class model
+  above Opus (1M context, 128K output, always-on thinking) is now reachable
+  through chat, the Anthropic client, and Smart Routing. Added to the README
+  model table and Anthropic-client examples. No SDK code change — model IDs pass
+  through to the gateway.
+
+## 0.17.0
+
+- **Image generation now handles the async (202 + `poll_url`) gateway contract.**
+  The gateway's image endpoints are hybrid: fast models settle inline and return
+  `200 { data: [...] }`; slow models (e.g. `openai/gpt-image-2`) return
+  `202 { id, poll_url }` and settle USDC only on the first poll that observes
+  `status == completed`. `Generate`/`Edit` previously rejected the 202 envelope as
+  an `APIError`, so slow generations always errored even though the image was
+  produced (and the abandoned job was never charged). Both methods now run the
+  same sign-once → submit → poll flow as the video client and always return the
+  synchronous `ImageResponse` shape — callers never see the async envelope. Adds
+  `ImageResponse.TxHash` (settlement receipt from `X-Payment-Receipt`) and records
+  cost only when completion is observed; failed jobs record nothing. Shared
+  poll/cost helpers were extracted to `baseClient` (the video client now delegates).
+
 ## 0.16.2
 
 - **Harden video poll: terminal success is keyed on `status=="completed"`, not a
