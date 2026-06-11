@@ -18,6 +18,10 @@ All notable changes to blockrun-llm-go will be documented in this file.
   through chat, the Anthropic client, and Smart Routing. Added to the README
   model table and Anthropic-client examples. No SDK code change — model IDs pass
   through to the gateway.
+- **Docs: rewrote "How Payment Works"** into an explicit two-phase money flow —
+  fund the wallet once (Onramp / transfer / free models), then every request
+  pays itself via the inline x402 402→sign→retry→settle loop — with how to check
+  balance, track spend, and verify settlements on Basescan.
 
 ## 0.17.0
 
