@@ -58,7 +58,7 @@ func WithAnthropicTimeout(timeout time.Duration) AnthropicClientOption {
 // SECURITY: Your private key is used ONLY for local EIP-712 signing.
 // The key NEVER leaves your machine - only signatures are transmitted.
 func NewAnthropicClient(privateKey string, opts ...AnthropicClientOption) (*AnthropicClient, error) {
-	bc, err := newBaseClient(privateKey, "", DefaultTimeout)
+	bc, err := newBaseClient(privateKey, "", defaultTimeout())
 	if err != nil {
 		return nil, err
 	}
@@ -88,13 +88,13 @@ type AnthropicMessage struct {
 
 // AnthropicContentBlock represents a single content block in a message.
 type AnthropicContentBlock struct {
-	Type       string                    `json:"type"`                  // "text", "image", "tool_use", "tool_result"
-	Text       string                    `json:"text,omitempty"`        // for type "text"
-	ID         string                    `json:"id,omitempty"`          // for type "tool_use"
-	Name       string                    `json:"name,omitempty"`        // for type "tool_use"
-	Input      map[string]any            `json:"input,omitempty"`       // for type "tool_use"
-	ToolUseID  string                    `json:"tool_use_id,omitempty"` // for type "tool_result"
-	Source     *AnthropicImageSource     `json:"source,omitempty"`      // for type "image"
+	Type      string                `json:"type"`                  // "text", "image", "tool_use", "tool_result"
+	Text      string                `json:"text,omitempty"`        // for type "text"
+	ID        string                `json:"id,omitempty"`          // for type "tool_use"
+	Name      string                `json:"name,omitempty"`        // for type "tool_use"
+	Input     map[string]any        `json:"input,omitempty"`       // for type "tool_use"
+	ToolUseID string                `json:"tool_use_id,omitempty"` // for type "tool_result"
+	Source    *AnthropicImageSource `json:"source,omitempty"`      // for type "image"
 }
 
 // AnthropicImageSource describes an image source (base64 or URL).
@@ -141,11 +141,11 @@ type AnthropicUsage struct {
 // AnthropicResponse is the response from Messages.Create.
 type AnthropicResponse struct {
 	ID           string                  `json:"id"`
-	Type         string                  `json:"type"`         // "message"
-	Role         string                  `json:"role"`         // "assistant"
+	Type         string                  `json:"type"` // "message"
+	Role         string                  `json:"role"` // "assistant"
 	Content      []AnthropicContentBlock `json:"content"`
 	Model        string                  `json:"model"`
-	StopReason   string                  `json:"stop_reason"`  // "end_turn", "max_tokens", "tool_use", "stop_sequence"
+	StopReason   string                  `json:"stop_reason"` // "end_turn", "max_tokens", "tool_use", "stop_sequence"
 	StopSequence string                  `json:"stop_sequence,omitempty"`
 	Usage        AnthropicUsage          `json:"usage"`
 }
