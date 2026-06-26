@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // Test wallet for testing purposes only - never use in production
@@ -54,6 +55,47 @@ func TestNewLLMClientEmptyKey(t *testing.T) {
 	_, err := NewLLMClient("")
 	if err == nil {
 		t.Error("Expected error for empty key, got nil")
+	}
+}
+
+func TestDefaultTimeout(t *testing.T) {
+	// Unset env -> falls back to DefaultTimeout (600s).
+	t.Setenv("BLOCKRUN_CHAT_TIMEOUT", "")
+	if got := defaultTimeout(); got != DefaultTimeout {
+		t.Errorf("Expected DefaultTimeout %v with env unset, got %v", DefaultTimeout, got)
+	}
+	if DefaultTimeout != 600*time.Second {
+		t.Errorf("Expected DefaultTimeout to be 600s, got %v", DefaultTimeout)
+	}
+
+	// Valid integer seconds -> honored.
+	t.Setenv("BLOCKRUN_CHAT_TIMEOUT", "300")
+	if got := defaultTimeout(); got != 300*time.Second {
+		t.Errorf("Expected 300s from env, got %v", got)
+	}
+
+	// Invalid value -> falls back to DefaultTimeout.
+	t.Setenv("BLOCKRUN_CHAT_TIMEOUT", "not-a-number")
+	if got := defaultTimeout(); got != DefaultTimeout {
+		t.Errorf("Expected fallback to DefaultTimeout on invalid env, got %v", got)
+	}
+
+	// Non-positive value -> falls back to DefaultTimeout.
+	t.Setenv("BLOCKRUN_CHAT_TIMEOUT", "0")
+	if got := defaultTimeout(); got != DefaultTimeout {
+		t.Errorf("Expected fallback to DefaultTimeout on zero env, got %v", got)
+	}
+}
+
+func TestWithTimeoutOverridesDefault(t *testing.T) {
+	// Per-call/per-client override via WithTimeout must win over the default.
+	t.Setenv("BLOCKRUN_CHAT_TIMEOUT", "300")
+	client, err := NewLLMClient(testPrivateKey, WithTimeout(42*time.Second))
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	if client.httpClient.Timeout != 42*time.Second {
+		t.Errorf("Expected WithTimeout override of 42s, got %v", client.httpClient.Timeout)
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,9 +18,26 @@ const (
 	// DefaultMaxTokens is the default max tokens for chat completions.
 	DefaultMaxTokens = 1024
 
-	// DefaultTimeout is the default HTTP timeout.
-	DefaultTimeout = 60 * time.Second
+	// DefaultTimeout is the default HTTP timeout for chat completions.
+	//
+	// Reasoning models (opus-4.8, deepseek-v4-pro) routinely take 200-300s+,
+	// so the old 60s default cut off non-streaming calls. Override via the
+	// BLOCKRUN_CHAT_TIMEOUT env var (integer seconds). Mirrors blockrun-llm 1.4.7.
+	DefaultTimeout = 600 * time.Second
 )
+
+// defaultTimeout returns the default chat HTTP timeout. It reads the
+// BLOCKRUN_CHAT_TIMEOUT environment variable (integer seconds) and falls back
+// to DefaultTimeout (600s) when unset or invalid. A per-call/per-client
+// override via WithTimeout still wins, since options are applied after this.
+func defaultTimeout() time.Duration {
+	if v := os.Getenv("BLOCKRUN_CHAT_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return DefaultTimeout
+}
 
 // LLMClient is the BlockRun LLM gateway client.
 //
@@ -79,7 +98,7 @@ func WithCache(enabled bool) ClientOption {
 // SECURITY: Your private key is used ONLY for local EIP-712 signing.
 // The key NEVER leaves your machine - only signatures are transmitted.
 func NewLLMClient(privateKey string, opts ...ClientOption) (*LLMClient, error) {
-	bc, err := newBaseClient(privateKey, "", DefaultTimeout)
+	bc, err := newBaseClient(privateKey, "", defaultTimeout())
 	if err != nil {
 		return nil, err
 	}
