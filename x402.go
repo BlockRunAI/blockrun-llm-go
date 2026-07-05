@@ -33,40 +33,6 @@ func createNonce() (string, error) {
 	return "0x" + common.Bytes2Hex(nonce), nil
 }
 
-// BlockRunServiceCode is BlockRun's x402 builder code — the ERC-8021 Schema 2
-// service code (s) that tags every payment this SDK signs as BlockRun-originated
-// for on-chain attribution.
-// See https://docs.cdp.coinbase.com/x402/core-concepts/builder-codes
-const BlockRunServiceCode = "blockrun"
-
-// withBuilderCodeServiceCode merges BlockRun's service code (s) into the
-// payload's builder-code extension, preserving any app code (a) the server
-// echoed back in its 402. The CDP facilitator reads builder-code.info.s and
-// encodes it into the settlement calldata suffix — no CBOR happens client-side.
-func withBuilderCodeServiceCode(extensions map[string]any) map[string]any {
-	merged := map[string]any{}
-	for k, v := range extensions {
-		merged[k] = v
-	}
-
-	builderCode := map[string]any{}
-	info := map[string]any{}
-	if bc, ok := merged["builder-code"].(map[string]any); ok {
-		for k, v := range bc {
-			builderCode[k] = v
-		}
-		if existingInfo, ok := bc["info"].(map[string]any); ok {
-			for k, v := range existingInfo {
-				info[k] = v
-			}
-		}
-	}
-	info["s"] = []string{BlockRunServiceCode}
-	builderCode["info"] = info
-	merged["builder-code"] = builderCode
-	return merged
-}
-
 // CreatePaymentPayload creates a signed x402 v2 payment payload.
 //
 // This uses EIP-712 typed data signing to create a payment authorization
@@ -213,7 +179,7 @@ func CreatePaymentPayload(
 				Nonce:       nonce,
 			},
 		},
-		Extensions: withBuilderCodeServiceCode(extensions),
+		Extensions: extensions,
 	}
 
 	// Encode as JSON then base64
