@@ -18,6 +18,10 @@ import (
 
 // baseClient contains the shared fields and methods for all BlockRun clients.
 // It handles HTTP requests, x402 payment negotiation, and spending tracking.
+//
+// The default chain is Base (EIP-712 signing with privateKey). When chain is
+// "solana" the client pays USDC on Solana instead: privateKey is nil, solanaKey
+// holds the bs58 signing key, and address is the bs58 public key.
 type baseClient struct {
 	privateKey      *ecdsa.PrivateKey
 	address         string
@@ -28,7 +32,20 @@ type baseClient struct {
 	sessionTotalUSD float64
 	sessionCalls    int
 	costLog         *CostLog
+
+	// chain is "base" (default) or "solana".
+	chain string
+	// solanaKey is the bs58 Solana signing key (only set when chain == "solana").
+	solanaKey string
+	// solanaRPCURL fetches blockhash + mint info while signing (chain == "solana").
+	solanaRPCURL string
 }
+
+// chainSolana identifies the Solana payment chain.
+const chainSolana = "solana"
+
+// isSolana reports whether this client pays on Solana.
+func (bc *baseClient) isSolana() bool { return bc.chain == chainSolana }
 
 // newBaseClient creates a new baseClient with the given private key, API URL, and timeout.
 //
@@ -79,12 +96,113 @@ func newBaseClient(privateKey, apiURL string, timeout time.Duration) (*baseClien
 	return bc, nil
 }
 
-// checkEnvAPIURL overrides apiURL with BLOCKRUN_API_URL env var if still at default.
-// Called after options are applied so user-set URLs take precedence.
+// newSolanaBaseClient creates a baseClient that pays USDC on Solana.
+//
+// If solanaKey is empty it is loaded via LoadSolanaWallet (SOLANA_WALLET_KEY →
+// ~/.*/solana-wallet.json → ~/.blockrun/.solana-session). If apiURL is empty,
+// DefaultSolanaAPIURL is used; BLOCKRUN_SOLANA_API_URL can override. If rpcURL is
+// empty, DefaultSolanaRPCURL is used; SOLANA_RPC_URL can override.
+func newSolanaBaseClient(solanaKey, apiURL, rpcURL string, timeout time.Duration) (*baseClient, error) {
+	key := solanaKey
+	if key == "" {
+		loaded, err := LoadSolanaWallet()
+		if err != nil {
+			return nil, &ValidationError{Field: "privateKey", Message: fmt.Sprintf("Failed to load Solana wallet: %v", err)}
+		}
+		key = loaded
+	}
+	if key == "" {
+		return nil, &ValidationError{
+			Field:   "privateKey",
+			Message: "Solana private key required. Pass privateKey, set SOLANA_WALLET_KEY, or create ~/.blockrun/.solana-session. NOTE: Your key never leaves your machine - only signatures are sent.",
+		}
+	}
+
+	address, err := GetSolanaPublicKey(key)
+	if err != nil {
+		return nil, &ValidationError{Field: "privateKey", Message: fmt.Sprintf("Invalid Solana private key: %v", err)}
+	}
+
+	if apiURL == "" {
+		apiURL = DefaultSolanaAPIURL
+	}
+	if rpcURL == "" {
+		rpcURL = strings.TrimSpace(os.Getenv("SOLANA_RPC_URL"))
+	}
+	if rpcURL == "" {
+		rpcURL = DefaultSolanaRPCURL
+	}
+
+	return &baseClient{
+		address:      address,
+		apiURL:       strings.TrimSuffix(apiURL, "/"),
+		httpClient:   &http.Client{Timeout: timeout},
+		costLog:      NewCostLog(),
+		chain:        chainSolana,
+		solanaKey:    key,
+		solanaRPCURL: rpcURL,
+	}, nil
+}
+
+// checkEnvAPIURL overrides apiURL with the chain's API-URL env var if still at
+// the chain default. Called after options are applied so user-set URLs win.
 func (bc *baseClient) checkEnvAPIURL() {
+	if bc.isSolana() {
+		if envURL := os.Getenv("BLOCKRUN_SOLANA_API_URL"); envURL != "" && bc.apiURL == DefaultSolanaAPIURL {
+			bc.apiURL = strings.TrimSuffix(envURL, "/")
+		}
+		return
+	}
 	if envURL := os.Getenv("BLOCKRUN_API_URL"); envURL != "" && bc.apiURL == DefaultAPIURL {
 		bc.apiURL = strings.TrimSuffix(envURL, "/")
 	}
+}
+
+// pollPaymentPayload returns the PAYMENT-SIGNATURE to attach to an async poll.
+//
+// Base reuses the submit-time signature: its EIP-712 authorization window
+// (validBefore = now + maxTimeout, floored at the client's poll budget) covers
+// the whole poll loop, and the gateway binds by wallet, not signature equality.
+//
+// Solana MUST re-sign periodically: a Solana transaction is pinned to a recent
+// blockhash that expires within ~1-2 minutes, so the submit-time transaction
+// would fail simulation by the time a slow job completes. It re-signs (fresh
+// blockhash) once the current signature is older than solanaPollResignInterval,
+// well inside the blockhash lifetime; the gateway settles the transaction
+// attached to the poll that first observes completion, so that settling
+// transaction is always fresh. On a re-sign error the current payload is kept so
+// the poll still surfaces a meaningful gateway error rather than a local one.
+//
+// Returns the payload to use and the (possibly updated) last-signed time.
+func (bc *baseClient) pollPaymentPayload(current string, lastSigned time.Time, option *PaymentOption, resourceURL, description string, extensions map[string]any) (string, time.Time) {
+	if !bc.isSolana() || time.Since(lastSigned) < solanaPollResignInterval {
+		return current, lastSigned
+	}
+	fresh, err := bc.createPaymentPayload(option, resourceURL, description, extensions)
+	if err != nil {
+		return current, lastSigned
+	}
+	return fresh, time.Now()
+}
+
+// createPaymentPayload signs an x402 payment for the resolved chain. Base uses
+// EIP-712 (secp256k1); Solana uses the SVM exact scheme (ed25519). This is the
+// single signing entry point shared by every payment retry path.
+func (bc *baseClient) createPaymentPayload(option *PaymentOption, resourceURL, description string, extensions map[string]any) (string, error) {
+	if bc.isSolana() {
+		return CreateSolanaPaymentPayload(bc.solanaKey, option, resourceURL, description, extensions, bc.solanaRPCURL)
+	}
+	return CreatePaymentPayload(
+		bc.privateKey,
+		option.PayTo,
+		option.Amount,
+		option.Network,
+		resourceURL,
+		description,
+		option.MaxTimeoutSeconds,
+		option.Extra,
+		extensions,
+	)
 }
 
 // GetWalletAddress returns the wallet address being used for payments.
@@ -289,17 +407,7 @@ func (bc *baseClient) handleGetPaymentAndRetry(ctx context.Context, url string, 
 		resourceURL = url
 	}
 
-	paymentPayload, err := CreatePaymentPayload(
-		bc.privateKey,
-		paymentOption.PayTo,
-		paymentOption.Amount,
-		paymentOption.Network,
-		resourceURL,
-		paymentReq.Resource.Description,
-		paymentOption.MaxTimeoutSeconds,
-		paymentOption.Extra,
-		paymentReq.Extensions,
-	)
+	paymentPayload, err := bc.createPaymentPayload(paymentOption, resourceURL, paymentReq.Resource.Description, paymentReq.Extensions)
 	if err != nil {
 		return nil, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
 	}
@@ -421,17 +529,7 @@ func (bc *baseClient) handlePaymentAndRetryHeaders(ctx context.Context, url stri
 	}
 
 	// Create signed payment payload
-	paymentPayload, err := CreatePaymentPayload(
-		bc.privateKey,
-		paymentOption.PayTo,
-		paymentOption.Amount,
-		paymentOption.Network,
-		resourceURL,
-		paymentReq.Resource.Description,
-		paymentOption.MaxTimeoutSeconds,
-		paymentOption.Extra,
-		paymentReq.Extensions,
-	)
+	paymentPayload, err := bc.createPaymentPayload(paymentOption, resourceURL, paymentReq.Resource.Description, paymentReq.Extensions)
 	if err != nil {
 		return nil, nil, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
 	}
