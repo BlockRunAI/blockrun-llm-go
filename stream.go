@@ -223,17 +223,7 @@ func (c *LLMClient) handleStreamPaymentAndRetry(ctx context.Context, url string,
 	}
 
 	// Create signed payment payload
-	paymentPayload, err := CreatePaymentPayload(
-		c.privateKey,
-		paymentOption.PayTo,
-		paymentOption.Amount,
-		paymentOption.Network,
-		resourceURL,
-		paymentReq.Resource.Description,
-		paymentOption.MaxTimeoutSeconds,
-		paymentOption.Extra,
-		paymentReq.Extensions,
-	)
+	paymentPayload, err := c.createPaymentPayload(paymentOption, resourceURL, paymentReq.Resource.Description, paymentReq.Extensions)
 	if err != nil {
 		return nil, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
 	}

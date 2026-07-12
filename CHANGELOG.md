@@ -2,6 +2,25 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.19.0
+
+- **Solana (SVM) x402 payments.** Every client can now pay USDC on Solana via
+  `sol.blockrun.ai` instead of Base. New `NewXClientSolana(privateKey, rpcURL, opts...)`
+  constructors (`NewLLMClientSolana`, `NewAnthropicClientSolana`, `NewImageClientSolana`,
+  `NewVideoClientSolana`, `NewSpeechClientSolana`, `NewMusicClientSolana`,
+  `NewVoiceClientSolana`, `NewPhoneClientSolana`, `NewRealFaceClientSolana`,
+  `NewPortraitClientSolana`) mirror their Base counterparts. The bs58 key is used
+  only for local ed25519 signing of an x402 "exact"-scheme v0 transaction (SPL
+  `TransferChecked` USDC + compute budget + memo nonce); the facilitator co-signs
+  and settles gaslessly. Base behaviour is unchanged and remains the default.
+- **`LoadSolanaWallet` / `GetSolanaPublicKey` / `CreateSolanaPaymentPayload`** —
+  Solana wallet resolution (`SOLANA_WALLET_KEY` → `~/.*/solana-wallet.json` →
+  `~/.blockrun/.solana-session`) and SVM payment signing, exposed for advanced use.
+  New constants: `DefaultSolanaAPIURL`, `DefaultSolanaRPCURL`, `USDCSolanaMainnet`.
+  Env overrides: `BLOCKRUN_SOLANA_API_URL`, `SOLANA_RPC_URL`.
+- Adds dependency `github.com/gagliardetto/solana-go` (v0 transaction build + ATA
+  derivation) and `github.com/mr-tron/base58`.
+
 ## 0.18.0
 
 - **`LLMClient.Onramp(ctx, address)`** — mint a one-time Coinbase Onramp link to
