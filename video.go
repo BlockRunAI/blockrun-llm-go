@@ -384,21 +384,12 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 	if resourceURL == "" {
 		resourceURL = submitURL
 	}
-	maxTimeout := paymentOption.MaxTimeoutSeconds
-	if maxTimeout < videoMaxTimeoutSeconds {
-		maxTimeout = videoMaxTimeoutSeconds
+	if paymentOption.MaxTimeoutSeconds < videoMaxTimeoutSeconds {
+		// Floor the validity window so the same signature survives the poll window
+		// (Base/EIP-712 only; the Solana path re-derives validity from the blockhash).
+		paymentOption.MaxTimeoutSeconds = videoMaxTimeoutSeconds
 	}
-	paymentPayload, err := CreatePaymentPayload(
-		c.privateKey,
-		paymentOption.PayTo,
-		paymentOption.Amount,
-		paymentOption.Network,
-		resourceURL,
-		paymentReq.Resource.Description,
-		maxTimeout,
-		paymentOption.Extra,
-		paymentReq.Extensions,
-	)
+	paymentPayload, err := c.createPaymentPayload(paymentOption, resourceURL, paymentReq.Resource.Description, paymentReq.Extensions)
 	if err != nil {
 		return nil, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
 	}
@@ -444,12 +435,15 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 
 	pollURL := c.absoluteURL(submitData.PollURL)
 
-	// Step 4: poll with the same PAYMENT-SIGNATURE until completed.
+	// Step 4: poll until completed. Base reuses the submit signature; Solana
+	// re-signs with a fresh blockhash once the current one nears expiry.
 	deadline := time.Now().Add(videoPollBudget)
 	lastStatus := submitData.Status
 	if lastStatus == "" {
 		lastStatus = "queued"
 	}
+	pollSig := paymentPayload
+	lastSigned := time.Now()
 
 	for time.Now().Before(deadline) {
 		select {
@@ -462,7 +456,8 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 		if err != nil {
 			return nil, fmt.Errorf("failed to create poll request: %w", err)
 		}
-		pollReq.Header.Set("PAYMENT-SIGNATURE", paymentPayload)
+		pollSig, lastSigned = c.pollPaymentPayload(pollSig, lastSigned, paymentOption, resourceURL, paymentReq.Resource.Description, paymentReq.Extensions)
+		pollReq.Header.Set("PAYMENT-SIGNATURE", pollSig)
 		pollResp, err := c.httpClient.Do(pollReq)
 		if err != nil {
 			return nil, fmt.Errorf("poll request failed: %w", err)

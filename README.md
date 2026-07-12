@@ -123,6 +123,26 @@ All of this happens in one method call — you just get the response back (or a
 **Your private key never leaves your machine** — it only signs payments locally;
 only the signature is transmitted. BlockRun is non-custodial and never holds your funds.
 
+## Pay on Solana
+
+Every client has a `NewXClientSolana` counterpart that pays **USDC on Solana** via
+`sol.blockrun.ai` instead of Base — same API, same verbatim responses:
+
+```go
+client, _ := blockrun.NewAnthropicClientSolana("", "")  // bs58 key from ~/.blockrun/.solana-session; default RPC
+img, _    := blockrun.NewImageClientSolana("", "")
+```
+
+Signatures are `func NewXClientSolana(privateKey, rpcURL string, opts ...XClientOption)`.
+`privateKey` is a bs58 Solana key (empty → `SOLANA_WALLET_KEY` → `~/.*/solana-wallet.json`
+→ `~/.blockrun/.solana-session`); `rpcURL` fetches the blockhash + mint info (empty →
+`SOLANA_RPC_URL` → BlockRun's free proxy). Payment is the x402 **SVM "exact" scheme**: a
+locally ed25519-signed `TransferChecked` USDC transaction that BlockRun's facilitator
+co-signs (gasless) and settles. Constructors: `NewLLMClientSolana`,
+`NewAnthropicClientSolana`, `NewImageClientSolana`, `NewVideoClientSolana`,
+`NewSpeechClientSolana`, `NewMusicClientSolana`, `NewVoiceClientSolana`,
+`NewPhoneClientSolana`, `NewRealFaceClientSolana`, `NewPortraitClientSolana`.
+
 ## Features
 
 | Feature | Description |
