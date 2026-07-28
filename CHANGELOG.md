@@ -2,6 +2,20 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.19.1
+
+- **perf(solana): drop both RPC round-trips from the x402 payment critical
+  path.** Mirrors the TS SDK fast path. USDC mint info (token program +
+  decimals) is hardcoded — SPL Token fixes `decimals` in `InitializeMint` and
+  ships no instruction to change it — so `getAccountInfo` is gone outright for
+  USDC (non-USDC mints still resolve over RPC). `getLatestBlockhash` is cached
+  per RPC endpoint with a 10s TTL (bounded to 8 endpoints). Unlike the TS SDK,
+  no duplicate-transaction guard is needed when a blockhash is reused: every
+  transaction carries a random 16-byte memo nonce, so two payments can never
+  be byte-identical. Measured on paid gpt-4o-mini calls via `sol.blockrun.ai`:
+  median 2.16s → 1.72s, mean 3.57s → 1.74s, worst case 9.68s → 2.31s (the old
+  tail was slow serial RPC).
+
 ## 0.19.0
 
 - **Solana (SVM) x402 payments.** Every client can now pay USDC on Solana via
