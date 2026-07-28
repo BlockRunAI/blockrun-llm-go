@@ -22,10 +22,104 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
 )
+
+// --- Payment fast path -------------------------------------------------------
+// Two RPC round-trips used to sit serially on the critical path of EVERY
+// Solana payment (each ~300ms typical, multi-second tail against the default
+// proxy): getAccountInfo, to read the mint's token program and decimals, and
+// getLatestBlockhash. Mirrors the TS SDK optimization (src/x402.ts).
+//
+// getAccountInfo is skipped for USDC: SPL Token fixes `decimals` in
+// InitializeMint and ships no instruction to change it, and USDC's owner is
+// the classic token program, so both values are immutable and known.
+// getLatestBlockhash is cached per endpoint.
+//
+// Unlike the TS SDK, no duplicate-transaction guard is needed when a blockhash
+// is reused: every transaction built here carries a random 16-byte memo nonce
+// (see buildSignedSolanaExactTx), so two payments can never compile to the
+// same bytes or the same ed25519 signature.
+
+const (
+	// solanaBlockhashTTL bounds how stale a cached blockhash may be. A
+	// blockhash is valid for ~150 slots (~60s) and the default RPC proxy
+	// already caches getLatestBlockhash for 30s server-side, so a value can be
+	// 30s old on arrival; a 10s client TTL keeps the worst case at ~40s and
+	// leaves ~20s of settlement margin.
+	solanaBlockhashTTL = 10 * time.Second
+
+	// maxTrackedSolanaEndpoints bounds the blockhash cache so a caller that
+	// builds a fresh RPC URL per request cannot grow it without limit.
+	maxTrackedSolanaEndpoints = 8
+
+	// usdcSolanaDecimals is USDC's immutable mint decimals.
+	usdcSolanaDecimals = 6
+)
+
+// solanaTimeNow is a test seam for the cache TTL.
+var solanaTimeNow = time.Now
+
+type solanaBlockhashEntry struct {
+	blockhash solana.Hash
+	fetchedAt time.Time
+}
+
+// solanaBlockhashCache holds the latest blockhash per RPC endpoint. Keyed by
+// URL because endpoints genuinely differ on what "latest" is, and a client
+// alternating between a primary and a fallback would otherwise evict the
+// entry on every call.
+var solanaBlockhashCache = struct {
+	mu      sync.Mutex
+	entries map[string]solanaBlockhashEntry
+}{entries: map[string]solanaBlockhashEntry{}}
+
+// cachedSolanaBlockhash returns a recent blockhash for rpcURL, fetching over
+// RPC only when the cached entry is missing or older than the TTL. The lock is
+// released during the fetch so concurrent payments on other endpoints are not
+// serialized; concurrent misses on one endpoint may fetch twice, which is
+// harmless (last write wins).
+func cachedSolanaBlockhash(rpcURL string) (solana.Hash, error) {
+	now := solanaTimeNow()
+	solanaBlockhashCache.mu.Lock()
+	if e, ok := solanaBlockhashCache.entries[rpcURL]; ok && now.Sub(e.fetchedAt) < solanaBlockhashTTL {
+		solanaBlockhashCache.mu.Unlock()
+		return e.blockhash, nil
+	}
+	solanaBlockhashCache.mu.Unlock()
+
+	hash, err := solanaLatestBlockhash(rpcURL)
+	if err != nil {
+		return solana.Hash{}, err
+	}
+
+	solanaBlockhashCache.mu.Lock()
+	defer solanaBlockhashCache.mu.Unlock()
+	solanaBlockhashCache.entries[rpcURL] = solanaBlockhashEntry{blockhash: hash, fetchedAt: solanaTimeNow()}
+	for len(solanaBlockhashCache.entries) > maxTrackedSolanaEndpoints {
+		oldestKey := ""
+		var oldest time.Time
+		for k, e := range solanaBlockhashCache.entries {
+			if oldestKey == "" || e.fetchedAt.Before(oldest) {
+				oldestKey, oldest = k, e.fetchedAt
+			}
+		}
+		delete(solanaBlockhashCache.entries, oldestKey)
+	}
+	return hash, nil
+}
+
+// resolveSolanaMintInfo returns the mint's token program and decimals,
+// hardcoded for USDC and fetched over RPC for any other mint.
+func resolveSolanaMintInfo(rpcURL, mint string) (solana.PublicKey, uint8, error) {
+	if mint == USDCSolanaMainnet {
+		return solana.MustPublicKeyFromBase58(tokenProgramAddress), usdcSolanaDecimals, nil
+	}
+	return solanaMintInfo(rpcURL, mint)
+}
 
 // solanaPaymentEnvelope is the x402 v2 PaymentPayload for the SVM exact scheme,
 // serialized with camelCase keys and base64-encoded into the payment header.
@@ -78,13 +172,13 @@ func CreateSolanaPaymentPayload(bs58Key string, option *PaymentOption, resourceU
 		return "", &PaymentError{Message: fmt.Sprintf("invalid amount %q: %v", option.Amount, err)}
 	}
 
-	// Token program + decimals from the mint account (Token vs Token-2022).
-	tokenProgram, decimals, err := solanaMintInfo(rpcURL, option.Asset)
+	// Token program + decimals (Token vs Token-2022); hardcoded for USDC.
+	tokenProgram, decimals, err := resolveSolanaMintInfo(rpcURL, option.Asset)
 	if err != nil {
 		return "", &PaymentError{Message: fmt.Sprintf("failed to fetch mint info: %v", err)}
 	}
 
-	blockhash, err := solanaLatestBlockhash(rpcURL)
+	blockhash, err := cachedSolanaBlockhash(rpcURL)
 	if err != nil {
 		return "", &PaymentError{Message: fmt.Sprintf("failed to fetch blockhash: %v", err)}
 	}
