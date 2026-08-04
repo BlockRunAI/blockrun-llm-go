@@ -2,6 +2,19 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.19.4
+
+- **fix(cache): paid GETs now honour the response cache.** `doGetWithPayment`
+  never consulted `bc.cache`, unlike `doGet`, so `WithCache(true)` was a silent
+  no-op on exactly the endpoints that cost money — `/v1/pm/` carries a
+  30-minute TTL yet every repeat call re-signed and re-paid USDC while the
+  caller believed caching was on. The cache is now read on the way in and
+  written on both the free-200 and the post-payment branch, keyed on the query
+  as well as the endpoint so two queries on one endpoint cannot collide.
+  Endpoints without a configured TTL (`/v1/zerox/`, `/v1/defillama/`,
+  `/v1/surf/`) are unaffected and still hit the network every time rather than
+  serving stale quotes. Fixes #10.
+
 ## 0.19.3
 
 - **perf(solana): zero client-side RPC on the payment path.** Implements the
