@@ -3,12 +3,24 @@ package blockrun
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/mr-tron/base58"
 )
+
+// resetSolanaBlockhashCache clears the package-level blockhash cache so each
+// test observes its own RPC traffic.
+func resetSolanaBlockhashCache() {
+	solanaBlockhashCache.mu.Lock()
+	defer solanaBlockhashCache.mu.Unlock()
+	solanaBlockhashCache.entries = map[string]solanaBlockhashEntry{}
+}
 
 // makeBlockhash returns a deterministic-enough random blockhash for tests.
 func makeBlockhash(t *testing.T) solana.Hash {
@@ -218,5 +230,111 @@ func TestSolanaKeypairAndPublicKey(t *testing.T) {
 	ed, err := solanaKeypair(full)
 	if err != nil || len(ed) != ed25519.PrivateKeySize {
 		t.Fatalf("solanaKeypair(full): key len %d err %v", len(ed), err)
+	}
+}
+
+// TestCreateSolanaPaymentPayloadUsesServerBlockhash pins the x402 spec change
+// (x402-foundation/x402#2693): when the 402 requirement carries
+// extra.recentBlockhash, the client MUST sign with it and make ZERO RPC calls.
+func TestCreateSolanaPaymentPayloadUsesServerBlockhash(t *testing.T) {
+	priv, err := solana.NewRandomPrivateKey()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	serverHash := makeBlockhash(t)
+
+	rpcCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rpcCalls++
+		http.Error(w, "client must not call RPC when server provides blockhash", http.StatusTeapot)
+	}))
+	defer srv.Close()
+	resetSolanaBlockhashCache()
+
+	opt := &PaymentOption{
+		Scheme:            "exact",
+		Network:           "solana",
+		Amount:            "1000",
+		Asset:             USDCSolanaMainnet, // mint info hardcoded — no RPC for it
+		PayTo:             solana.NewWallet().PublicKey().String(),
+		MaxTimeoutSeconds: 60,
+		Extra: map[string]any{
+			"feePayer":             solana.NewWallet().PublicKey().String(),
+			"recentBlockhash":      serverHash.String(),
+			"lastValidBlockHeight": "123456789",
+		},
+	}
+
+	payload, err := CreateSolanaPaymentPayload(base58.Encode(priv), opt, "https://x/r", "", nil, srv.URL)
+	if err != nil {
+		t.Fatalf("CreateSolanaPaymentPayload: %v", err)
+	}
+	if rpcCalls != 0 {
+		t.Errorf("RPC calls = %d, want 0 (server-provided blockhash must be used)", rpcCalls)
+	}
+
+	// The signed transaction must carry the server-provided blockhash.
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	var env solanaPaymentEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	txBytes, err := base64.StdEncoding.DecodeString(env.Payload["transaction"])
+	if err != nil {
+		t.Fatalf("decode tx: %v", err)
+	}
+	tx, err := solana.TransactionFromBytes(txBytes)
+	if err != nil {
+		t.Fatalf("parse tx: %v", err)
+	}
+	if tx.Message.RecentBlockhash != serverHash {
+		t.Errorf("tx blockhash = %s, want server-provided %s", tx.Message.RecentBlockhash, serverHash)
+	}
+}
+
+// TestCreateSolanaPaymentPayloadFallsBackWithoutServerBlockhash pins graceful
+// degradation: an absent or malformed extra.recentBlockhash falls back to the
+// RPC fetch instead of failing.
+func TestCreateSolanaPaymentPayloadFallsBackWithoutServerBlockhash(t *testing.T) {
+	priv, err := solana.NewRandomPrivateKey()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	rpcHash := makeBlockhash(t)
+
+	rpcCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rpcCalls++
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":1},"value":{"blockhash":%q,"lastValidBlockHeight":1}}}`, rpcHash.String())
+	}))
+	defer srv.Close()
+
+	for name, extra := range map[string]map[string]any{
+		"absent":    {"feePayer": solana.NewWallet().PublicKey().String()},
+		"malformed": {"feePayer": solana.NewWallet().PublicKey().String(), "recentBlockhash": "not-base58!!"},
+	} {
+		resetSolanaBlockhashCache()
+		rpcCalls = 0
+		opt := &PaymentOption{
+			Scheme:  "exact",
+			Network: "solana",
+			Amount:  "1000",
+			Asset:   USDCSolanaMainnet,
+			PayTo:   solana.NewWallet().PublicKey().String(),
+			Extra:   extra,
+		}
+		payload, err := CreateSolanaPaymentPayload(base58.Encode(priv), opt, "https://x/r", "", nil, srv.URL)
+		if err != nil {
+			t.Fatalf("%s: CreateSolanaPaymentPayload: %v", name, err)
+		}
+		if rpcCalls == 0 {
+			t.Errorf("%s: expected RPC fallback fetch, got 0 calls", name)
+		}
+		if payload == "" {
+			t.Errorf("%s: empty payload", name)
+		}
 	}
 }
