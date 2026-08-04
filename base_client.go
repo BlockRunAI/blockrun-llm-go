@@ -210,6 +210,15 @@ func (bc *baseClient) createPaymentPayload(option *PaymentOption, resourceURL, d
 // server-provided-blockhash fast path (see createSolanaPaymentPayload).
 // allowServerBlockhash is ignored on Base.
 func (bc *baseClient) signPayment(option *PaymentOption, resourceURL, description string, extensions map[string]any, allowServerBlockhash bool) (string, error) {
+	// Every payment path funnels through here, so this is the one place the
+	// no-wallet invariant cannot be bypassed. Without it a keyless Base client
+	// reaches CreatePaymentPayload and nil-derefs on privateKey.PublicKey,
+	// panicking the caller's goroutine instead of returning an error. The
+	// exported constructors always set a key, so this is defence in depth —
+	// but the guard belongs at the choke point, not at one of six call sites.
+	if !bc.hasWallet() {
+		return "", &PaymentError{Message: "endpoint returned 402 but no wallet is configured"}
+	}
 	if bc.isSolana() {
 		return createSolanaPaymentPayload(bc.solanaKey, option, resourceURL, description, extensions, bc.solanaRPCURL, allowServerBlockhash)
 	}
@@ -402,10 +411,11 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusPaymentRequired {
-		// Check for ANY signing key, not just the Base one: Solana clients
-		// leave privateKey nil by design and sign with solanaKey instead
-		// (see the baseClient doc comment), so guarding on privateKey alone
-		// rejected every paid GET for Solana before signing was attempted.
+		// Kept alongside the signPayment guard on purpose: bailing here skips
+		// parsing the 402 body, so a keyless client gets "no wallet is
+		// configured" rather than whatever parse error a malformed 402 would
+		// produce first. signPayment holds the invariant; this holds the
+		// message.
 		if !bc.hasWallet() {
 			return nil, &PaymentError{Message: "endpoint returned 402 but no wallet is configured"}
 		}
