@@ -47,6 +47,17 @@ const chainSolana = "solana"
 // isSolana reports whether this client pays on Solana.
 func (bc *baseClient) isSolana() bool { return bc.chain == chainSolana }
 
+// hasWallet reports whether a signing key is configured for the resolved chain.
+// Base signs with privateKey (secp256k1); Solana signs with solanaKey (ed25519)
+// and leaves privateKey nil, so a privateKey-only check silently locks Solana
+// clients out of every paid endpoint.
+func (bc *baseClient) hasWallet() bool {
+	if bc.isSolana() {
+		return bc.solanaKey != ""
+	}
+	return bc.privateKey != nil
+}
+
 // newBaseClient creates a new baseClient with the given private key, API URL, and timeout.
 //
 // If privateKey is empty, it checks BLOCKRUN_WALLET_KEY then BASE_CHAIN_WALLET_KEY env vars.
@@ -366,7 +377,11 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusPaymentRequired {
-		if bc.privateKey == nil {
+		// Check for ANY signing key, not just the Base one: Solana clients
+		// leave privateKey nil by design and sign with solanaKey instead
+		// (see the baseClient doc comment), so guarding on privateKey alone
+		// rejected every paid GET for Solana before signing was attempted.
+		if !bc.hasWallet() {
 			return nil, &PaymentError{Message: "endpoint returned 402 but no wallet is configured"}
 		}
 		return bc.handleGetPaymentAndRetry(ctx, url, resp)
