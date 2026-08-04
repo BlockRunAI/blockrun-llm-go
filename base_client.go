@@ -352,10 +352,35 @@ func (bc *baseClient) doGet(ctx context.Context, endpoint string) ([]byte, error
 	return data, nil
 }
 
+// cacheQueryBody reshapes a GET's query map into the map[string]any the cache
+// keys on. Without it every query on one endpoint would share a cache entry and
+// serve another query's response.
+func cacheQueryBody(query map[string]string) map[string]any {
+	if len(query) == 0 {
+		return nil
+	}
+	body := make(map[string]any, len(query))
+	for k, v := range query {
+		body[k] = v
+	}
+	return body
+}
+
 // doGetWithPayment issues a GET, and if it comes back 402, signs the payment
 // and retries. This is used for Pyth-backed market-data endpoints where the
 // same path may be free (crypto/fx/commodity) or paid (stocks/usstock).
+//
+// The cache is consulted on the way in and populated on the way out, on both
+// the free and the paid branch. It matters more here than on doGet: a miss on
+// this path costs real USDC, not just latency.
 func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, query map[string]string) ([]byte, error) {
+	cacheBody := cacheQueryBody(query)
+	if bc.cache != nil {
+		if cached, ok := bc.cache.Get(endpoint, cacheBody); ok {
+			return cached, nil
+		}
+	}
+
 	url := bc.apiURL + endpoint
 	if len(query) > 0 {
 		sep := "?"
@@ -384,7 +409,14 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 		if !bc.hasWallet() {
 			return nil, &PaymentError{Message: "endpoint returned 402 but no wallet is configured"}
 		}
-		return bc.handleGetPaymentAndRetry(ctx, url, resp)
+		data, err := bc.handleGetPaymentAndRetry(ctx, url, resp)
+		if err != nil {
+			return nil, err
+		}
+		if bc.cache != nil {
+			bc.cache.Set(endpoint, cacheBody, data)
+		}
+		return data, nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -395,7 +427,14 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 		}
 	}
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if bc.cache != nil {
+		bc.cache.Set(endpoint, cacheBody, data)
+	}
+	return data, nil
 }
 
 // handleGetPaymentAndRetry mirrors handlePaymentAndRetry for GET requests
