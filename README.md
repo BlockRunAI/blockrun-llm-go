@@ -135,7 +135,8 @@ img, _    := blockrun.NewImageClientSolana("", "")
 
 Signatures are `func NewXClientSolana(privateKey, rpcURL string, opts ...XClientOption)`.
 `privateKey` is a bs58 Solana key (empty → `SOLANA_WALLET_KEY` → `~/.*/solana-wallet.json`
-→ `~/.blockrun/.solana-session`); `rpcURL` fetches the blockhash + mint info (empty →
+→ `~/.blockrun/.solana-session`); `rpcURL` fetches mint info for non-USDC assets, plus the
+blockhash when the 402 requirement does not carry one (empty →
 `SOLANA_RPC_URL` → BlockRun's free proxy). Payment is the x402 **SVM "exact" scheme**: a
 locally ed25519-signed `TransferChecked` USDC transaction that BlockRun's facilitator
 co-signs (gasless) and settles. Constructors: `NewLLMClientSolana`,

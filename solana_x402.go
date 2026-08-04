@@ -37,7 +37,9 @@ import (
 // getAccountInfo is skipped for USDC: SPL Token fixes `decimals` in
 // InitializeMint and ships no instruction to change it, and USDC's owner is
 // the classic token program, so both values are immutable and known.
-// getLatestBlockhash is cached per endpoint.
+// getLatestBlockhash is skipped entirely when the 402 requirement carries
+// extra.recentBlockhash (x402-foundation/x402#2693); the per-endpoint cache
+// below is the fallback for servers that do not send one.
 //
 // Unlike the TS SDK, no duplicate-transaction guard is needed when a blockhash
 // is reused: every transaction built here carries a random 16-byte memo nonce
@@ -130,12 +132,40 @@ type solanaPaymentEnvelope struct {
 	Accepted    PaymentOption     `json:"accepted"`
 }
 
+// serverProvidedBlockhash extracts extra.recentBlockhash from a 402 payment
+// requirement. Returns ok=false when the field is absent, not a valid
+// base58-encoded 32-byte hash, or the all-zero hash — base58 decodes
+// "111...1" successfully but it is never a real blockhash, and signing with
+// it would produce a transaction that can never settle.
+func serverProvidedBlockhash(extra map[string]any) (solana.Hash, bool) {
+	s, _ := extra["recentBlockhash"].(string)
+	if s == "" {
+		return solana.Hash{}, false
+	}
+	hash, err := solana.HashFromBase58(s)
+	if err != nil || hash.IsZero() {
+		return solana.Hash{}, false
+	}
+	return hash, true
+}
+
 // CreateSolanaPaymentPayload builds a signed x402 SVM exact-scheme payment
 // payload (base64) for the given 402 payment option. rpcURL (blockhash + mint
 // info) defaults to DefaultSolanaRPCURL when empty. resourceURL/description/
 // extensions are accepted for signature parity with CreatePaymentPayload; the
 // SVM envelope does not carry them (matching the Python client).
 func CreateSolanaPaymentPayload(bs58Key string, option *PaymentOption, resourceURL, description string, extensions map[string]any, rpcURL string) (string, error) {
+	return createSolanaPaymentPayload(bs58Key, option, resourceURL, description, extensions, rpcURL, true)
+}
+
+// createSolanaPaymentPayload implements CreateSolanaPaymentPayload with control
+// over the server-provided-blockhash fast path.
+//
+// allowServerBlockhash MUST be false for async poll re-signs: extra.recentBlockhash
+// is pinned to the moment the 402 was issued and expires within ~1-2 minutes, so
+// honoring it on every re-sign would hand back the same expiring hash and defeat
+// the whole point of re-signing (see baseClient.pollPaymentPayload).
+func createSolanaPaymentPayload(bs58Key string, option *PaymentOption, resourceURL, description string, extensions map[string]any, rpcURL string, allowServerBlockhash bool) (string, error) {
 	if option == nil {
 		return "", &PaymentError{Message: "nil payment option"}
 	}
@@ -178,9 +208,22 @@ func CreateSolanaPaymentPayload(bs58Key string, option *PaymentOption, resourceU
 		return "", &PaymentError{Message: fmt.Sprintf("failed to fetch mint info: %v", err)}
 	}
 
-	blockhash, err := cachedSolanaBlockhash(rpcURL)
-	if err != nil {
-		return "", &PaymentError{Message: fmt.Sprintf("failed to fetch blockhash: %v", err)}
+	// Server-provided blockhash (x402-foundation/x402#2693): when the 402
+	// requirement carries extra.recentBlockhash, sign with it — it is fresher
+	// than anything the client can cache AND pinned to an RPC view the settler
+	// has observed, and it removes the last client RPC from the payment path.
+	// Malformed values fall back to the RPC fetch rather than failing.
+	var blockhash solana.Hash
+	var ok bool
+	if allowServerBlockhash {
+		blockhash, ok = serverProvidedBlockhash(option.Extra)
+	}
+	if !ok {
+		var err error
+		blockhash, err = cachedSolanaBlockhash(rpcURL)
+		if err != nil {
+			return "", &PaymentError{Message: fmt.Sprintf("failed to fetch blockhash: %v", err)}
+		}
 	}
 
 	txBytes, err := buildSignedSolanaExactTx(priv, feePayer, payer, payTo, mint, tokenProgram, amount, decimals, blockhash)

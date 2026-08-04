@@ -3,8 +3,15 @@ package blockrun
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/mr-tron/base58"
@@ -218,5 +225,196 @@ func TestSolanaKeypairAndPublicKey(t *testing.T) {
 	ed, err := solanaKeypair(full)
 	if err != nil || len(ed) != ed25519.PrivateKeySize {
 		t.Fatalf("solanaKeypair(full): key len %d err %v", len(ed), err)
+	}
+}
+
+// TestCreateSolanaPaymentPayloadUsesServerBlockhash pins the x402 spec change
+// (x402-foundation/x402#2693): when the 402 requirement carries
+// extra.recentBlockhash, the client MUST sign with it and make ZERO RPC calls.
+func TestCreateSolanaPaymentPayloadUsesServerBlockhash(t *testing.T) {
+	priv, err := solana.NewRandomPrivateKey()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	serverHash := makeBlockhash(t)
+
+	rpcCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rpcCalls++
+		http.Error(w, "client must not call RPC when server provides blockhash", http.StatusTeapot)
+	}))
+	defer srv.Close()
+	resetSolanaBlockhashCacheForTest(t)
+
+	opt := &PaymentOption{
+		Scheme:            "exact",
+		Network:           "solana",
+		Amount:            "1000",
+		Asset:             USDCSolanaMainnet, // mint info hardcoded — no RPC for it
+		PayTo:             solana.NewWallet().PublicKey().String(),
+		MaxTimeoutSeconds: 60,
+		Extra: map[string]any{
+			"feePayer":             solana.NewWallet().PublicKey().String(),
+			"recentBlockhash":      serverHash.String(),
+			"lastValidBlockHeight": "123456789",
+		},
+	}
+
+	payload, err := CreateSolanaPaymentPayload(base58.Encode(priv), opt, "https://x/r", "", nil, srv.URL)
+	if err != nil {
+		t.Fatalf("CreateSolanaPaymentPayload: %v", err)
+	}
+	if rpcCalls != 0 {
+		t.Errorf("RPC calls = %d, want 0 (server-provided blockhash must be used)", rpcCalls)
+	}
+
+	// The signed transaction must carry the server-provided blockhash.
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	var env solanaPaymentEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	txBytes, err := base64.StdEncoding.DecodeString(env.Payload["transaction"])
+	if err != nil {
+		t.Fatalf("decode tx: %v", err)
+	}
+	tx, err := solana.TransactionFromBytes(txBytes)
+	if err != nil {
+		t.Fatalf("parse tx: %v", err)
+	}
+	if tx.Message.RecentBlockhash != serverHash {
+		t.Errorf("tx blockhash = %s, want server-provided %s", tx.Message.RecentBlockhash, serverHash)
+	}
+}
+
+// TestCreateSolanaPaymentPayloadFallsBackWithoutServerBlockhash pins graceful
+// degradation: an absent or malformed extra.recentBlockhash falls back to the
+// RPC fetch instead of failing.
+func TestCreateSolanaPaymentPayloadFallsBackWithoutServerBlockhash(t *testing.T) {
+	priv, err := solana.NewRandomPrivateKey()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	rpcHash := makeBlockhash(t)
+
+	rpcCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rpcCalls++
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":1},"value":{"blockhash":%q,"lastValidBlockHeight":1}}}`, rpcHash.String())
+	}))
+	defer srv.Close()
+
+	for name, extra := range map[string]map[string]any{
+		"absent":    {"feePayer": solana.NewWallet().PublicKey().String()},
+		"malformed": {"feePayer": solana.NewWallet().PublicKey().String(), "recentBlockhash": "not-base58!!"},
+		// base58 decodes the all-zero hash fine, but it is never a real
+		// blockhash — signing with it would produce an unsettleable tx.
+		"zero hash": {"feePayer": solana.NewWallet().PublicKey().String(), "recentBlockhash": solana.Hash{}.String()},
+		// Non-string JSON types must not panic or be coerced.
+		"wrong type": {"feePayer": solana.NewWallet().PublicKey().String(), "recentBlockhash": 12345},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resetSolanaBlockhashCacheForTest(t)
+			rpcCalls = 0
+			opt := &PaymentOption{
+				Scheme:  "exact",
+				Network: "solana",
+				Amount:  "1000",
+				Asset:   USDCSolanaMainnet,
+				PayTo:   solana.NewWallet().PublicKey().String(),
+				Extra:   extra,
+			}
+			payload, err := CreateSolanaPaymentPayload(base58.Encode(priv), opt, "https://x/r", "", nil, srv.URL)
+			if err != nil {
+				t.Fatalf("CreateSolanaPaymentPayload: %v", err)
+			}
+			if rpcCalls == 0 {
+				t.Errorf("expected RPC fallback fetch, got 0 calls")
+			}
+			// The RPC-fetched hash must actually reach the signed transaction —
+			// asserting only "payload != \"\"" would still pass if the fetched
+			// value were dropped and a zero blockhash signed instead.
+			if got := decodePaymentTx(t, payload).Message.RecentBlockhash; got != rpcHash {
+				t.Errorf("tx blockhash = %s, want RPC-fetched %s", got, rpcHash)
+			}
+		})
+	}
+}
+
+// TestCreateSolanaPaymentPayloadBlockhashRPCFailure pins the error path this
+// change re-wired: no server blockhash AND the RPC fetch fails.
+func TestCreateSolanaPaymentPayloadBlockhashRPCFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rpc down", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	resetSolanaBlockhashCacheForTest(t)
+
+	opt := testPaymentOption(USDCSolanaMainnet) // no recentBlockhash in Extra
+	_, err := CreateSolanaPaymentPayload(testSolanaKey(t), opt, "https://x/r", "", nil, srv.URL)
+	if err == nil {
+		t.Fatal("expected an error when the RPC fails and no server blockhash is provided")
+	}
+	if !strings.Contains(err.Error(), "failed to fetch blockhash") {
+		t.Errorf("error = %v, want it to mention the failed blockhash fetch", err)
+	}
+}
+
+// TestPollPaymentPayloadForcesFreshBlockhash pins the regression that the
+// server-provided-blockhash fast path must NOT leak into async poll re-signs.
+//
+// extra.recentBlockhash is pinned to the moment the 402 was issued and expires
+// within ~1-2 minutes. pollPaymentPayload exists to re-sign long image/video
+// jobs with a FRESH blockhash; if it honored the server value it would hand
+// back the same expiring hash forever and the settling tx would be expired.
+func TestPollPaymentPayloadForcesFreshBlockhash(t *testing.T) {
+	serverHash := makeBlockhash(t)
+	rpcHash := makeBlockhash(t)
+
+	var rpcCalls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rpcCalls.Add(1)
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":{"value":{"blockhash":%q}}}`, rpcHash.String())
+	}))
+	defer srv.Close()
+	resetSolanaBlockhashCacheForTest(t)
+
+	bc := &baseClient{chain: chainSolana, solanaKey: testSolanaKey(t), solanaRPCURL: srv.URL}
+	opt := testPaymentOption(USDCSolanaMainnet)
+	opt.Extra["recentBlockhash"] = serverHash.String()
+
+	// Submit-time signing keeps the zero-RPC fast path.
+	submitted, err := bc.createPaymentPayload(opt, "https://x/r", "", nil)
+	if err != nil {
+		t.Fatalf("createPaymentPayload: %v", err)
+	}
+	if got := decodePaymentTx(t, submitted).Message.RecentBlockhash; got != serverHash {
+		t.Errorf("submit-time blockhash = %s, want server-provided %s", got, serverHash)
+	}
+	if n := rpcCalls.Load(); n != 0 {
+		t.Errorf("submit-time RPC calls = %d, want 0", n)
+	}
+
+	// A re-sign past the interval must fetch a fresh blockhash instead.
+	stale := time.Now().Add(-2 * solanaPollResignInterval)
+	resigned, lastSigned := bc.pollPaymentPayload(submitted, stale, opt, "https://x/r", "", nil)
+	if resigned == submitted {
+		t.Fatal("poll did not re-sign past the resign interval")
+	}
+	if lastSigned.Equal(stale) {
+		t.Error("lastSigned was not advanced after a re-sign")
+	}
+	got := decodePaymentTx(t, resigned).Message.RecentBlockhash
+	if got == serverHash {
+		t.Error("re-sign reused the expiring server-provided blockhash; it must fetch a fresh one")
+	}
+	if got != rpcHash {
+		t.Errorf("re-signed blockhash = %s, want freshly fetched %s", got, rpcHash)
+	}
+	if n := rpcCalls.Load(); n == 0 {
+		t.Error("re-sign made no RPC call, so it cannot have gotten a fresh blockhash")
 	}
 }

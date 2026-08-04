@@ -189,7 +189,10 @@ func (bc *baseClient) pollPaymentPayload(current string, lastSigned time.Time, o
 	if !bc.isSolana() || time.Since(lastSigned) < solanaPollResignInterval {
 		return current, lastSigned
 	}
-	fresh, err := bc.createPaymentPayload(option, resourceURL, description, extensions)
+	// allowServerBlockhash=false: the 402's extra.recentBlockhash is pinned to
+	// submit time, so reusing it here would re-sign with the same expiring hash
+	// and defeat the re-sign. Force a fresh one.
+	fresh, err := bc.signPayment(option, resourceURL, description, extensions, false)
 	if err != nil {
 		return current, lastSigned
 	}
@@ -200,8 +203,15 @@ func (bc *baseClient) pollPaymentPayload(current string, lastSigned time.Time, o
 // EIP-712 (secp256k1); Solana uses the SVM exact scheme (ed25519). This is the
 // single signing entry point shared by every payment retry path.
 func (bc *baseClient) createPaymentPayload(option *PaymentOption, resourceURL, description string, extensions map[string]any) (string, error) {
+	return bc.signPayment(option, resourceURL, description, extensions, true)
+}
+
+// signPayment is createPaymentPayload with control over the Solana
+// server-provided-blockhash fast path (see createSolanaPaymentPayload).
+// allowServerBlockhash is ignored on Base.
+func (bc *baseClient) signPayment(option *PaymentOption, resourceURL, description string, extensions map[string]any, allowServerBlockhash bool) (string, error) {
 	if bc.isSolana() {
-		return CreateSolanaPaymentPayload(bc.solanaKey, option, resourceURL, description, extensions, bc.solanaRPCURL)
+		return createSolanaPaymentPayload(bc.solanaKey, option, resourceURL, description, extensions, bc.solanaRPCURL, allowServerBlockhash)
 	}
 	return CreatePaymentPayload(
 		bc.privateKey,
