@@ -2,6 +2,18 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.19.5
+
+- **fix: the no-wallet guard now holds at the signing choke point.** `hasWallet()`
+  was checked at one of six 402 entry points; `doRequestHeaders`,
+  `handleStreamPaymentAndRetry`, `image.go`, `video.go` and `rpc.go` called the
+  signer directly. On Base a keyless client reaching that path dereferenced a nil
+  `*ecdsa.PrivateKey` and panicked the caller's goroutine instead of returning a
+  `PaymentError`. The guard moved into `signPayment`, which every payment path
+  funnels through, so the invariant holds by construction rather than by accident.
+  Not reachable through the exported constructors — they already require a key —
+  so this is defence in depth, not a live crash. Closes #15.
+
 ## 0.19.4
 
 - **fix(cache): paid GETs now honour the response cache.** `doGetWithPayment`
