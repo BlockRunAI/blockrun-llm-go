@@ -144,3 +144,44 @@ func TestPaidGetWithoutWalletStillRejected(t *testing.T) {
 		})
 	}
 }
+
+// TestPaidGetWithServerBlockhashMakesNoRPC pins the end-to-end claim of the
+// 0.19.3 fast path: a paid GET whose 402 carries extra.recentBlockhash signs
+// with that hash and makes zero client RPC calls.
+//
+// Neither existing test covers this. solana_x402_test.go exercises
+// extra.recentBlockhash at the signing-function level and never goes through a
+// paid GET; the tests above go through a paid GET but let the blockhash come
+// from the RPC fallback. Dropping both round trips is the entire point of the
+// fast path, so without this the optimisation can silently regress to a
+// working-but-slow RPC fetch and every test stays green.
+func TestPaidGetWithServerBlockhashMakesNoRPC(t *testing.T) {
+	resetSolanaBlockhashCacheForTest(t)
+	counter, rpcSrv := newRPCCounterServer(t, usdcSolanaDecimals)
+
+	serverHash := makeBlockhash(t)
+	opt := *testPaymentOption(USDCSolanaMainnet)
+	opt.Extra["recentBlockhash"] = serverHash.String()
+	srv, sawSignature := paidGetServer(t, opt)
+
+	bc := &baseClient{
+		chain:        chainSolana,
+		solanaKey:    testSolanaKey(t),
+		solanaRPCURL: rpcSrv.URL,
+		apiURL:       srv.URL,
+		httpClient:   srv.Client(),
+	}
+
+	if _, err := bc.doGetWithPayment(context.Background(), "/v1/paid", nil); err != nil {
+		t.Fatalf("paid GET failed: %v", err)
+	}
+	if got := decodePaymentTx(t, *sawSignature).Message.RecentBlockhash; !got.Equals(serverHash) {
+		t.Errorf("blockhash = %s, want the server-provided %s", got, serverHash)
+	}
+	if got := counter.blockhashCalls.Load(); got != 0 {
+		t.Errorf("getLatestBlockhash calls = %d, want 0 — the server supplied the blockhash", got)
+	}
+	if got := counter.mintCalls.Load(); got != 0 {
+		t.Errorf("getAccountInfo calls = %d, want 0 — USDC mint info is hardcoded", got)
+	}
+}
