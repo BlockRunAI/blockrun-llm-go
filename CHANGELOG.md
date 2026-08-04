@@ -2,6 +2,19 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.19.2
+
+- **fix(solana): paid GET endpoints work for Solana clients.** `doGetWithPayment`
+  guarded the 402 branch on `bc.privateKey == nil`, but Solana clients leave
+  `privateKey` nil by design and sign with `solanaKey`. Every paid GET therefore
+  failed with a misleading "endpoint returned 402 but no wallet is configured"
+  before signing was ever attempted. The guard is now chain-aware
+  (`baseClient.hasWallet`), so it resolves the expected key per chain and still
+  rejects a client with no key on either chain. Restores paid GET access for
+  Solana on market data (`Price`, `History`, `ListSymbols`), `Dex`, `Defi`, and
+  the prediction-market endpoints. POST paths use a different code path and were
+  never affected. Fixes #8.
+
 ## 0.19.1
 
 - **perf(solana): drop both RPC round-trips from the x402 payment critical
