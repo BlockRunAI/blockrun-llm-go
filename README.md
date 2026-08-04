@@ -125,8 +125,10 @@ only the signature is transmitted. BlockRun is non-custodial and never holds you
 
 ## Pay on Solana
 
-Every client has a `NewXClientSolana` counterpart that pays **USDC on Solana** via
-`sol.blockrun.ai` instead of Base — same API, same verbatim responses:
+Every LLM and media client has a `NewXClientSolana` counterpart that pays **USDC on
+Solana** via `sol.blockrun.ai` instead of Base — same API, same verbatim responses
+(`SurfClient` and `RPCClient` are Base-only for now, see
+[#12](https://github.com/BlockRunAI/blockrun-llm-go/issues/12)):
 
 ```go
 client, _ := blockrun.NewAnthropicClientSolana("", "")  // bs58 key from ~/.blockrun/.solana-session; default RPC
@@ -970,7 +972,7 @@ A Go SDK for pay-per-request access to <!-- br:models.chatVisible -->66<!-- /br:
 Pay only for what you use. 9 NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 USDC gets you thousands of paid-model requests.
 
 **Does it support Solana?**
-The Go SDK supports Base chain only. For Solana, use the [Python SDK](https://github.com/blockrunai/blockrun-llm) or [TypeScript SDK](https://github.com/blockrunai/blockrun-llm-ts).
+Yes. Every LLM and media client has a `NewXClientSolana` counterpart that pays USDC on Solana via `sol.blockrun.ai` — same API, same responses. See [Pay on Solana](#pay-on-solana). Base remains the default.
 
 **Is streaming supported?**
 Yes. Use `ChatCompletionStream` for SSE streaming.
