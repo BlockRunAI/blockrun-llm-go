@@ -2,6 +2,24 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.19.3
+
+- **perf(solana): zero client-side RPC on the payment path.** Implements the
+  client half of the x402 SVM spec fix (x402-foundation/x402#2693): when the 402
+  requirement carries `extra.recentBlockhash`, the signer uses it instead of
+  calling `getLatestBlockhash`. Combined with 0.19.1's hardcoded USDC mint info,
+  a USDC payment against a spec-aware gateway (sol.blockrun.ai serves the field
+  as of 2026-08-04) now makes **no RPC calls at all** — and the transaction is
+  pinned to a blockhash the settling RPC has already observed, which is fresher
+  than the 10s client cache and shrinks the blockhash-expiry settle retry tail.
+  Servers that omit the field fall back to the cached RPC fetch unchanged, as do
+  malformed and all-zero values.
+- **fix(solana): async poll re-signs always fetch a fresh blockhash.**
+  `pollPaymentPayload` re-signs long image/video jobs every 30s precisely to
+  escape blockhash expiry, but it reuses one `PaymentOption` — so honoring
+  `extra.recentBlockhash` there would have re-signed with the same expiring hash
+  and failed at settlement. The fast path is now gated to the submit path only.
+
 ## 0.19.2
 
 - **fix(solana): paid GET endpoints work for Solana clients.** `doGetWithPayment`
