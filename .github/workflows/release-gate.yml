@@ -1,0 +1,76 @@
+name: Release gate
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Fails when main carries shipped-but-unreleased library code.
+#
+# This has bitten twice. Both times a user-visible fix merged, VERSION stayed
+# put, no tag was pushed, and `go get` kept serving the broken version — the
+# repo looked fixed while every consumer stayed broken:
+#
+#   #9  (Solana paid GETs)  merged -> VERSION stuck at 0.19.1
+#   #17 (paid-GET caching)  merged -> VERSION stuck at 0.19.3
+#
+# Both PRs said "VERSION/CHANGELOG left for /ship" and /ship never ran. A tag
+# is the only thing the Go module proxy serves, so "merged" is not "released"
+# and no amount of remembering has proven sufficient.
+#
+# This job is EXPECTED to be red in the window between merging library code and
+# cutting the release. That red is the point: it is the repo saying users do not
+# have this yet. Go green by releasing.
+#
+# Deliberately NOT gated:
+#   - pull requests    — this repo's convention is that PRs leave VERSION alone
+#   - test-only diffs  — *_test.go changes ship nothing to consumers
+#   - docs, CI, config — same
+jobs:
+  unreleased:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full history + tags to compare against the last release
+
+      - name: Compare main against the latest tag
+        run: |
+          set -euo pipefail
+          git fetch --tags --force --quiet
+
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          LATEST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No tags yet — nothing to compare against."
+            exit 0
+          fi
+
+          echo "VERSION file : $VERSION"
+          echo "Latest tag   : $LATEST_TAG"
+
+          # A bumped VERSION with no matching tag is always wrong: the release
+          # was started and abandoned partway.
+          if ! git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::VERSION is $VERSION but tag v$VERSION does not exist. Finish the release: git tag -a v$VERSION -m '...' && git push origin v$VERSION"
+            exit 1
+          fi
+
+          # Library code that landed after the last tag is code users cannot get.
+          # Tests, docs, CI and config ship nothing, so they do not count.
+          UNRELEASED="$(git diff --name-only "$LATEST_TAG"..HEAD -- '*.go' ':(exclude)*_test.go')"
+
+          if [ -n "$UNRELEASED" ]; then
+            echo "::error::Library code changed since $LATEST_TAG but no new release was cut. Consumers of go get still receive $LATEST_TAG."
+            echo "Unreleased files:"
+            echo "$UNRELEASED" | sed 's/^/  /'
+            echo
+            echo "Commits since $LATEST_TAG:"
+            git log --oneline "$LATEST_TAG"..HEAD | sed 's/^/  /'
+            echo
+            echo "Fix: bump VERSION, add a CHANGELOG entry, then tag and push."
+            exit 1
+          fi
+
+          echo "main is fully released at $LATEST_TAG."
