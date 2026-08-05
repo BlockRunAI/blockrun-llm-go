@@ -150,7 +150,7 @@ co-signs (gasless) and settles. Constructors: `NewLLMClientSolana`,
 
 | Feature | Description |
 |---------|-------------|
-| **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->66<!-- /br:models.chatVisible --> models |
+| **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> models |
 | **Anthropic Client** | Native Anthropic Messages API with automatic x402 payments |
 | **Smart Routing** | Auto-selects the best model for your prompt |
 | **Streaming** | SSE streaming for real-time responses |
@@ -922,7 +922,7 @@ for _, w := range wallets {
 | **ElevenLabs** | Flash v2.5, Turbo v2.5, Multilingual v2, v3 (TTS $0.05–0.10/1k chars), Sound Effects ($0.05/gen) | — | — |
 | **Moonshot** | Kimi K2.6 (256K, vision + reasoning) | $0.95 | $4.00 |
 | **Moonshot** | Kimi K2.5 (262K context, legacy) | $0.60 | $3.00 |
-| **NVIDIA** | DeepSeek V4 Pro/Flash, Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral (<!-- br:models.free -->8<!-- /br:models.free --> models) | **FREE** | **FREE** |
+| **NVIDIA** | DeepSeek V4 Pro/Flash, Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral (<!-- br:models.free -->6<!-- /br:models.free --> models) | **FREE** | **FREE** |
 
 Use `client.ListModels(ctx)` for the full list with current pricing.
 
@@ -966,7 +966,7 @@ if err != nil {
 ## FAQ
 
 **What is blockrun-llm-go?**
-A Go SDK for pay-per-request access to <!-- br:models.chatVisible -->66<!-- /br:models.chatVisible --> LLMs, multi-chain RPC, web search, prediction markets, and image generation. Uses x402 micropayments — no API keys, no subscriptions.
+A Go SDK for pay-per-request access to <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> LLMs, multi-chain RPC, web search, prediction markets, and image generation. Uses x402 micropayments — no API keys, no subscriptions.
 
 **How much does it cost?**
 Pay only for what you use. 9 NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 USDC gets you thousands of paid-model requests.
