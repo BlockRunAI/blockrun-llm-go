@@ -922,7 +922,7 @@ for _, w := range wallets {
 | **ElevenLabs** | Flash v2.5, Turbo v2.5, Multilingual v2, v3 (TTS $0.05–0.10/1k chars), Sound Effects ($0.05/gen) | — | — |
 | **Moonshot** | Kimi K2.6 (256K, vision + reasoning) | $0.95 | $4.00 |
 | **Moonshot** | Kimi K2.5 (262K context, legacy) | $0.60 | $3.00 |
-| **NVIDIA** | DeepSeek V4 Pro/Flash, Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral (<!-- br:models.free -->6<!-- /br:models.free --> models) | **FREE** | **FREE** |
+| **NVIDIA** | DeepSeek V4 Pro/Flash, Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral (<!-- br:models.free -->5<!-- /br:models.free --> models) | **FREE** | **FREE** |
 
 Use `client.ListModels(ctx)` for the full list with current pricing.
 
