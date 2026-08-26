@@ -104,9 +104,8 @@ Base**. A Solana client (`NewLLMClientSolana`, key via `SOLANA_WALLET_KEY`) need
 - **Skip funding entirely** — call the [free NVIDIA models](#try-it-free-no-usdc-required); they cost $0 and need no balance.
 
 $5 of USDC covers thousands of paid-model requests. `client.GetBalance(ctx)`
-reports it — **Base only**, since it reads the Base USDC contract over Base RPC.
-There is no Solana balance helper yet; check a Solana wallet with an explorer or
-your own RPC call.
+reports it on whichever chain the client pays from — the Base USDC contract for
+a Base client, the USDC SPL mint for a Solana one.
 
 ### 2. Every request pays itself (automatic x402)
 
@@ -157,10 +156,30 @@ own chain rather than the first one listed. A 402 that offers no option this
 client can sign fails immediately with a chain-mismatch error naming what was
 offered, instead of failing deep inside signing.
 
-Two helpers stay **Base-only** and do not work from a Solana client: `Onramp`
-(rejects non-EVM addresses) and `GetBalance` / `GetBalanceTestnet` (they read the
-Base USDC contract over Base RPC, so a bs58 address gets a meaningless answer).
-Fund and check a Solana wallet through an explorer or your own RPC call.
+Wallet management has a Solana counterpart for every EVM helper:
+`CreateSolanaWallet`, `SaveSolanaWallet`, `GetOrCreateSolanaWallet`,
+`GetSolanaWalletAddressFromEnvOrFile`, `ScanSolanaWallets`,
+`GetSolanaPaymentLinks`, `GetSolanaPayURI`, and the three
+`FormatSolana*Message` funding helpers. Keys are written to
+`~/.blockrun/.solana-session` with mode 0600, same as the EVM side.
+
+```go
+w, _ := blockrun.GetOrCreateSolanaWallet() // mints + persists on first run
+if w.IsNew {
+    fmt.Println(blockrun.FormatSolanaWalletCreatedMessage(w.Address))
+}
+```
+
+`GetSolanaPayURI` builds a [Solana Pay](https://docs.solanapay.com) request
+pinned to the USDC mint. Note it is not a mirror of `GetEIP681URI`: EIP-681
+encodes a uint256 in base units, Solana Pay a decimal token amount, so 1.5 USDC
+is `1500000` in one and `1.5` in the other.
+
+One helper remains **Base-only**. `Onramp` rejects non-EVM addresses, so buying
+USDC with a card funds a Base wallet only — a Solana wallet has to be funded by
+transfer. `GetBalanceTestnet` also stays Base Sepolia and returns an explicit
+error on a Solana client, since no devnet USDC mint is configured; `GetBalance`
+itself works on both chains.
 
 ## Features
 
