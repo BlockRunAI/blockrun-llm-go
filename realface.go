@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -183,7 +184,7 @@ func (c *RealFaceClient) Status(ctx context.Context, groupID string) (*RealFaceS
 		return nil, &ValidationError{Field: "groupID", Message: "groupID must look like 'legacy_rf_<digits>'"}
 	}
 
-	endpoint := "/v1/realface/status?groupId=" + urlQueryEscape(groupID)
+	endpoint := "/v1/realface/status?groupId=" + url.QueryEscape(groupID)
 	respBytes, err := c.doGet(ctx, endpoint)
 	if err != nil {
 		return nil, err

@@ -187,19 +187,9 @@ func (c *LLMClient) ChatCompletionStream(ctx context.Context, model string, mess
 
 // handleStreamPaymentAndRetry handles a 402 response for streaming requests.
 func (c *LLMClient) handleStreamPaymentAndRetry(ctx context.Context, url string, jsonBody []byte, resp *http.Response) (*Stream, error) {
-	// Get payment required header
-	paymentHeader := resp.Header.Get("payment-required")
-	if paymentHeader == "" {
-		// Try to get from response body
-		var respBody map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&respBody); err == nil {
-			if _, ok := respBody["x402"]; ok {
-				jsonBytes, _ := json.Marshal(respBody)
-				paymentHeader = string(jsonBytes)
-			}
-		}
-	}
-
+	// Payment requirements: the header if the gateway sent one, else the body.
+	respBody, _ := io.ReadAll(resp.Body)
+	paymentHeader := paymentRequirementsFrom(resp.Header.Get("payment-required"), respBody)
 	if paymentHeader == "" {
 		return nil, &PaymentError{Message: "402 response but no payment requirements found"}
 	}
@@ -210,8 +200,8 @@ func (c *LLMClient) handleStreamPaymentAndRetry(ctx context.Context, url string,
 		return nil, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
 	}
 
-	// Extract payment details
-	paymentOption, err := ExtractPaymentDetails(paymentReq)
+	// Extract the option this client's chain can sign
+	paymentOption, err := c.extractPaymentDetails(paymentReq)
 	if err != nil {
 		return nil, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
 	}

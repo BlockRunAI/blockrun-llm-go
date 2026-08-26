@@ -266,7 +266,6 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	paymentHeader := resp1.Header.Get("payment-required")
 	body1, _ := io.ReadAll(resp1.Body)
 	resp1.Body.Close()
 
@@ -280,6 +279,7 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 			Message:    fmt.Sprintf("API error: %s", string(body1)),
 		}
 	}
+	paymentHeader := paymentRequirementsFrom(resp1.Header.Get("payment-required"), body1)
 	if paymentHeader == "" {
 		return nil, &PaymentError{Message: "402 response but no payment requirements found"}
 	}
@@ -290,7 +290,7 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 	if err != nil {
 		return nil, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
 	}
-	paymentOption, err := ExtractPaymentDetails(paymentReq)
+	paymentOption, err := c.extractPaymentDetails(paymentReq)
 	if err != nil {
 		return nil, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
 	}

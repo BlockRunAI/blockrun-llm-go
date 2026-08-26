@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -241,7 +242,7 @@ func (c *VoiceClient) GetCallStatus(ctx context.Context, callID string) (*CallSt
 		return nil, fmt.Errorf("callID is required")
 	}
 
-	endpoint := "/v1/voice/call/" + urlQueryEscape(callID)
+	endpoint := "/v1/voice/call/" + url.PathEscape(callID)
 	respBytes, err := c.doGet(ctx, endpoint)
 	if err != nil {
 		return nil, err
