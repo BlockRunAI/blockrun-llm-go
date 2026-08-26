@@ -2,7 +2,7 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
-## Unreleased
+## 0.20.0
 
 - **fix(solana): `GetBalance` reads the chain the client actually pays from.**
   It called `getUSDCBalance` against the Base USDC contract unconditionally, so
