@@ -80,28 +80,33 @@ fmt.Println(result.Response) // "4"
 
 ## How Payment Works
 
-No API keys, no subscription, no invoices. You hold USDC on Base in your own
-wallet, and **each request pays for itself** with an on-chain micropayment. Two
-phases: fund the wallet once, then every call settles automatically.
+No API keys, no subscription, no invoices. You hold USDC in your own wallet — on
+**Base** (the default) or **Solana** — and **each request pays for itself** with
+an on-chain micropayment. Two phases: fund the wallet once, then every call
+settles automatically.
 
-### 1. Fund your wallet once (get USDC on Base)
+### 1. Fund your wallet once
 
-The wallet you pass to `NewLLMClient` (private key, via `BASE_CHAIN_WALLET_KEY`)
-must hold a little **USDC on Base**. Three ways to get it there:
+A Base client (`NewLLMClient`, key via `BASE_CHAIN_WALLET_KEY`) needs **USDC on
+Base**. A Solana client (`NewLLMClientSolana`, key via `SOLANA_WALLET_KEY`) needs
+**USDC on Solana** instead. Three ways to get it there:
 
 - **Buy with a card** — mint a Coinbase Onramp link and pay with card/bank
-  (60+ fiat currencies). This is **free** (you're only funding your own wallet):
+  (60+ fiat currencies). This is **free** (you're only funding your own wallet).
+  **Base only** — `Onramp` rejects anything that isn't an EVM address:
 
   ```go
   res, _ := client.Onramp(ctx, client.GetWalletAddress())
   fmt.Println("Buy USDC:", res.URL) // open https://pay.coinbase.com/... and pay
   ```
 
-- **Transfer USDC** you already hold to your wallet address (`client.GetWalletAddress()`) on **Base** — make sure it's Base USDC, not another chain.
+- **Transfer USDC** you already hold to your wallet address (`client.GetWalletAddress()`) — on the same chain your client pays from. Base USDC for a Base client; Solana USDC (mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`) for a Solana client. Sending Base USDC to a Solana client's wallet does not work.
 - **Skip funding entirely** — call the [free NVIDIA models](#try-it-free-no-usdc-required); they cost $0 and need no balance.
 
-$5 of USDC covers thousands of paid-model requests. Check your balance anytime
-with `client.GetBalance(ctx)`.
+$5 of USDC covers thousands of paid-model requests. `client.GetBalance(ctx)`
+reports it — **Base only**, since it reads the Base USDC contract over Base RPC.
+There is no Solana balance helper yet; check a Solana wallet with an explorer or
+your own RPC call.
 
 ### 2. Every request pays itself (automatic x402)
 
@@ -109,7 +114,7 @@ You never call a "pay" function for inference — the SDK does it inline on each
 
 1. You call e.g. `client.Chat(ctx, model, prompt)`.
 2. The gateway replies **`402 Payment Required`** with the exact price for that call.
-3. The SDK signs a USDC payment on Base **locally** (EIP-712 typed data) for that amount.
+3. The SDK signs the payment **locally** — EIP-712 typed data on Base, or an ed25519-signed `TransferChecked` transaction on Solana, which BlockRun's facilitator co-signs as fee payer so the transfer costs you no SOL.
 4. It retries the request with the signed payment proof attached.
 5. The gateway settles the payment on-chain and returns your response.
 
@@ -120,7 +125,7 @@ All of this happens in one method call — you just get the response back (or a
 
 - **Per call, pay-as-you-go.** Price is set per endpoint/model (see [Available Models](#available-models)); free NVIDIA models settle $0.
 - **Track it.** `client.GetSpending()` returns this session's total USD + call count; a JSONL cost log persists across runs (see [Cost Tracking](#cost-tracking)).
-- **Verify on-chain.** Settlements are real USDC transfers on Base — auditable on [Basescan](https://basescan.org).
+- **Verify on-chain.** Settlements are real USDC transfers — auditable on [Basescan](https://basescan.org) for Base, [Solscan](https://solscan.io) for Solana.
 
 **Your private key never leaves your machine** — it only signs payments locally;
 only the signature is transmitted. BlockRun is non-custodial and never holds your funds.
@@ -151,6 +156,11 @@ When a 402 offers more than one chain, the client picks the option matching its
 own chain rather than the first one listed. A 402 that offers no option this
 client can sign fails immediately with a chain-mismatch error naming what was
 offered, instead of failing deep inside signing.
+
+Two helpers stay **Base-only** and do not work from a Solana client: `Onramp`
+(rejects non-EVM addresses) and `GetBalance` / `GetBalanceTestnet` (they read the
+Base USDC contract over Base RPC, so a bs58 address gets a meaningless answer).
+Fund and check a Solana wallet through an explorer or your own RPC call.
 
 ## Features
 
@@ -958,9 +968,9 @@ if err != nil {
 
 ## Security
 
-- **Private key stays local**: Only used for EIP-712 signing — never transmitted
+- **Private key stays local**: Only used for local signing — EIP-712 on Base, ed25519 on Solana — never transmitted
 - **Non-custodial**: BlockRun never holds your funds
-- **On-chain verifiable**: All payments visible on [Basescan](https://basescan.org)
+- **On-chain verifiable**: All payments visible on [Basescan](https://basescan.org) (Base) or [Solscan](https://solscan.io) (Solana)
 - Use environment variables, never hard-code keys
 - Use dedicated wallets with small balances for API payments
 
