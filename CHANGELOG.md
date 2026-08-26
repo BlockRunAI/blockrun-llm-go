@@ -2,7 +2,7 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
-## Unreleased
+## 0.19.6
 
 - **fix(x402): payment options are selected by chain, not by server ordering.**
   `ExtractPaymentDetails` always returned `accepts[0]` and `createPaymentPayload`
