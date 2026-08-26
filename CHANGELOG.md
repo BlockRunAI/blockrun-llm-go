@@ -2,6 +2,52 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## Unreleased
+
+- **fix(x402): payment options are selected by chain, not by server ordering.**
+  `ExtractPaymentDetails` always returned `accepts[0]` and `createPaymentPayload`
+  dispatched purely on the client's own chain, so nothing ever checked that the
+  selected option was one this client could pay. A gateway offering
+  `[base, solana]` handed a Solana client the Base option, which then died on
+  `invalid asset mint` with a payable Solana option untouched in `accepts[1]`.
+  New `ExtractPaymentDetailsForChain` selects on network — short names
+  (`base`, `solana`), testnets (`base-sepolia`, `solana-devnet`) and CAIP-2
+  (`eip155:8453`, `solana:…`) all classify — and a 402 that offers only another
+  chain now fails with a mismatch error naming what was offered, instead of
+  `feePayer is required in payment requirement extra`, which blamed the gateway
+  for a client-side mismatch. An unclassifiable network is still attempted, so
+  no gateway that worked before stops working. `ExtractPaymentDetails` keeps its
+  signature and its no-preference behaviour. Fixes #16.
+
+- **fix(x402): the 402 body fallback works for the first time.** Every payment
+  path fell back to reading payment requirements from the 402 body when the
+  `payment-required` header was absent, and handed the resulting raw JSON to
+  `ParsePaymentRequired`, which only base64-decoded. JSON starts with `{`, which
+  is not in the base64 alphabet, so the fallback always failed with
+  `illegal base64 data at input byte 0` — any gateway that answers with inline
+  requirements could never be paid. `ParsePaymentRequired` now accepts both
+  forms. Extraction is also down to a single `paymentRequirementsFrom` helper
+  shared by the GET, POST, stream, image and video paths: the previous copies
+  had drifted — one marshalled `body["x402"]`, another the whole body, and only
+  one had an `accepts` branch — so at most one of them could have been right.
+  Fixes #13.
+
+- **fix(security): GET URLs are built with `net/url`.** `doGetWithPayment`
+  escaped query values but concatenated query keys and the caller-supplied path
+  raw. Every caller forwards user input (`/v1/pm/`, `/v1/zerox/`,
+  `/v1/defillama/`, `/v1/surf/`), so a map key of `a&injected=1&b` forged extra
+  query parameters and a path containing `?` or `#` rewrote the request target.
+  The hand-rolled escaper is gone; keys, values and path segments are all
+  escaped by the standard library. Query encoding is now sorted, so the same
+  call produces the same request string every time. Fixes #14.
+
+- **feat(solana): `NewSurfClientSolana` and `NewRPCClientSolana`.** Both clients
+  were built only through `newBaseClient`, which never sets `chain`, so neither
+  could ever be a Solana client. `SurfClient.Get` is a paid GET, which made surf
+  unreachable for Solana wallets — before the #9 wallet-guard fix and after it.
+  README's "every client has a `NewXClientSolana` counterpart" is now true.
+  Fixes #12.
+
 ## 0.19.5
 
 - **fix: the no-wallet guard now holds at the signing choke point.** `hasWallet()`

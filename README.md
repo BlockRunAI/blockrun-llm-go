@@ -1,8 +1,10 @@
-# BlockRun LLM Go SDK
+# BlockRun Go SDK
 
-> **blockrun-llm-go** is a Go SDK for accessing 40+ large language models and AI services with automatic pay-per-request USDC micropayments via the x402 protocol on Base chain. No API keys required — your wallet signature is your authentication.
+> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request in USDC over the x402 protocol, on **Base or Solana**. No API keys required — your wallet signature is your authentication.
 >
-> 🆓 **Includes 9 fully-free NVIDIA-hosted models** — DeepSeek V4 Pro/Flash (1M context), Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral. Zero USDC, no rate-limit gimmicks. Use `blockrun.RoutingFree` or call any `nvidia/*` model directly.
+> The module keeps the name `blockrun-llm-go` because in Go the repository name *is* the import path, and renaming it would break every existing consumer. The SDK stopped being LLM-only long before v0.19.
+>
+> 🆓 **Includes <!-- br:models.free -->5<!-- /br:models.free --> fully-free NVIDIA-hosted models** — DeepSeek V4 Pro/Flash (1M context), Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral. Zero USDC, no rate-limit gimmicks. Use `blockrun.RoutingFree` or call any `nvidia/*` model directly.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/blockrunai/blockrun-llm-go.svg)](https://pkg.go.dev/github.com/blockrunai/blockrun-llm-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -125,10 +127,8 @@ only the signature is transmitted. BlockRun is non-custodial and never holds you
 
 ## Pay on Solana
 
-Every LLM and media client has a `NewXClientSolana` counterpart that pays **USDC on
-Solana** via `sol.blockrun.ai` instead of Base — same API, same verbatim responses
-(`SurfClient` and `RPCClient` are Base-only for now, see
-[#12](https://github.com/BlockRunAI/blockrun-llm-go/issues/12)):
+Every client has a `NewXClientSolana` counterpart that pays **USDC on
+Solana** via `sol.blockrun.ai` instead of Base — same API, same verbatim responses:
 
 ```go
 client, _ := blockrun.NewAnthropicClientSolana("", "")  // bs58 key from ~/.blockrun/.solana-session; default RPC
@@ -144,7 +144,13 @@ locally ed25519-signed `TransferChecked` USDC transaction that BlockRun's facili
 co-signs (gasless) and settles. Constructors: `NewLLMClientSolana`,
 `NewAnthropicClientSolana`, `NewImageClientSolana`, `NewVideoClientSolana`,
 `NewSpeechClientSolana`, `NewMusicClientSolana`, `NewVoiceClientSolana`,
-`NewPhoneClientSolana`, `NewRealFaceClientSolana`, `NewPortraitClientSolana`.
+`NewPhoneClientSolana`, `NewRealFaceClientSolana`, `NewPortraitClientSolana`,
+`NewSurfClientSolana`, `NewRPCClientSolana`.
+
+When a 402 offers more than one chain, the client picks the option matching its
+own chain rather than the first one listed. A 402 that offers no option this
+client can sign fails immediately with a chain-mismatch error naming what was
+offered, instead of failing deep inside signing.
 
 ## Features
 
@@ -961,18 +967,18 @@ if err != nil {
 ## Requirements
 
 - Go 1.22+
-- A wallet with USDC on Base chain
+- A wallet with USDC on Base — or a Solana wallet with USDC, see [Pay on Solana](#pay-on-solana)
 
 ## FAQ
 
 **What is blockrun-llm-go?**
-A Go SDK for pay-per-request access to <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> LLMs, multi-chain RPC, web search, prediction markets, and image generation. Uses x402 micropayments — no API keys, no subscriptions.
+The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Uses x402 micropayments — no API keys, no subscriptions. The `-llm-` in the name is history, not scope.
 
 **How much does it cost?**
-Pay only for what you use. 9 NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 USDC gets you thousands of paid-model requests.
+Pay only for what you use. <!-- br:models.free -->5<!-- /br:models.free --> NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 USDC gets you thousands of paid-model requests.
 
 **Does it support Solana?**
-Yes. Every LLM and media client has a `NewXClientSolana` counterpart that pays USDC on Solana via `sol.blockrun.ai` — same API, same responses. See [Pay on Solana](#pay-on-solana). Base remains the default.
+Yes. Every client has a `NewXClientSolana` counterpart that pays USDC on Solana via `sol.blockrun.ai` — same API, same responses. See [Pay on Solana](#pay-on-solana). Base remains the default.
 
 **Is streaming supported?**
 Yes. Use `ChatCompletionStream` for SSE streaming.

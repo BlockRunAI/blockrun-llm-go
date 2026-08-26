@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -41,11 +42,30 @@ type baseClient struct {
 	solanaRPCURL string
 }
 
-// chainSolana identifies the Solana payment chain.
-const chainSolana = "solana"
+// chainSolana and chainBase identify the two payment chains this SDK signs for.
+const (
+	chainSolana = "solana"
+	chainBase   = "base"
+)
 
 // isSolana reports whether this client pays on Solana.
 func (bc *baseClient) isSolana() bool { return bc.chain == chainSolana }
+
+// resolvedChain names the chain this client signs on. chain is left empty by
+// newBaseClient, so Base is the default.
+func (bc *baseClient) resolvedChain() string {
+	if bc.chain == "" {
+		return chainBase
+	}
+	return bc.chain
+}
+
+// extractPaymentDetails picks the option from a 402 that this client can
+// actually sign. Selecting purely on the server's ordering hands a Solana
+// client a Base option whenever a gateway lists Base first, and vice versa.
+func (bc *baseClient) extractPaymentDetails(req *PaymentRequirement) (*PaymentOption, error) {
+	return ExtractPaymentDetailsForChain(req, bc.resolvedChain())
+}
 
 // hasWallet reports whether a signing key is configured for the resolved chain.
 // Base signs with privateKey (secp256k1); Solana signs with solanaKey (ed25519)
@@ -390,13 +410,9 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 		}
 	}
 
-	url := bc.apiURL + endpoint
-	if len(query) > 0 {
-		sep := "?"
-		for k, v := range query {
-			url += sep + k + "=" + urlQueryEscape(v)
-			sep = "&"
-		}
+	url, err := buildRequestURL(bc.apiURL, endpoint, query)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -450,19 +466,8 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 // handleGetPaymentAndRetry mirrors handlePaymentAndRetry for GET requests
 // (no body to re-send; PAYMENT-SIGNATURE rides on a second GET to the same URL).
 func (bc *baseClient) handleGetPaymentAndRetry(ctx context.Context, url string, resp *http.Response) ([]byte, error) {
-	paymentHeader := resp.Header.Get("payment-required")
-	if paymentHeader == "" {
-		var respBody map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&respBody); err == nil {
-			if _, ok := respBody["x402"]; ok {
-				jsonBytes, _ := json.Marshal(respBody["x402"])
-				paymentHeader = string(jsonBytes)
-			} else if _, ok := respBody["accepts"]; ok {
-				jsonBytes, _ := json.Marshal(respBody)
-				paymentHeader = string(jsonBytes)
-			}
-		}
-	}
+	body, _ := io.ReadAll(resp.Body)
+	paymentHeader := paymentRequirementsFrom(resp.Header.Get("payment-required"), body)
 	if paymentHeader == "" {
 		return nil, &PaymentError{Message: "402 response but no payment requirements found"}
 	}
@@ -471,7 +476,7 @@ func (bc *baseClient) handleGetPaymentAndRetry(ctx context.Context, url string, 
 	if err != nil {
 		return nil, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
 	}
-	paymentOption, err := ExtractPaymentDetails(paymentReq)
+	paymentOption, err := bc.extractPaymentDetails(paymentReq)
 	if err != nil {
 		return nil, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
 	}
@@ -537,24 +542,67 @@ func (bc *baseClient) handleGetPaymentAndRetry(ctx context.Context, url string, 
 	return respBytes, nil
 }
 
-// urlQueryEscape is a minimal query-string escaper used by doGetWithPayment.
-// It avoids pulling in net/url just for this single use site.
-func urlQueryEscape(s string) string {
-	const hex = "0123456789ABCDEF"
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case 'A' <= c && c <= 'Z', 'a' <= c && c <= 'z', '0' <= c && c <= '9',
-			c == '-', c == '_', c == '.', c == '~':
-			b.WriteByte(c)
-		default:
-			b.WriteByte('%')
-			b.WriteByte(hex[c>>4])
-			b.WriteByte(hex[c&15])
+// buildRequestURL joins endpoint onto apiURL and appends query.
+//
+// Every part that a caller can influence is escaped by net/url: the endpoint is
+// set as url.URL.Path, so it is escaped as a path (slashes kept, "?" and "#"
+// escaped) and cannot rewrite the request target; url.Values.Encode escapes
+// query keys as well as values, so a key cannot forge extra parameters. Encode
+// also sorts by key, which makes the request string deterministic — a bare map
+// range used to leak Go's iteration order into every URL.
+func buildRequestURL(apiURL, endpoint string, query map[string]string) (string, error) {
+	u, err := url.Parse(apiURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid API URL %q: %w", apiURL, err)
+	}
+
+	u.Path = strings.TrimSuffix(u.Path, "/") + "/" + strings.TrimPrefix(endpoint, "/")
+	// Path is authoritative from here; a stale RawPath would be re-used verbatim.
+	u.RawPath = ""
+
+	if len(query) > 0 {
+		values := make(url.Values, len(query))
+		for k, v := range query {
+			values.Set(k, v)
+		}
+		u.RawQuery = values.Encode()
+	}
+
+	return u.String(), nil
+}
+
+// paymentRequirementsFrom returns the x402 payment-requirements payload of a
+// 402 response: the payment-required header when present, else the JSON body.
+//
+// The body fallback exists for gateways that answer with requirements inline
+// rather than in a header. Two body shapes are recognised — the requirement
+// nested under "x402", and a bare requirement with a top-level "accepts" — and
+// each is returned as the JSON that ParsePaymentRequired should see. Every
+// payment path shares this one copy: the previous per-path copies disagreed on
+// whether to marshal respBody["x402"] or the whole body, so at most one of them
+// could have been right.
+//
+// The return value is "" when the response carries no requirements at all.
+func paymentRequirementsFrom(header string, body []byte) string {
+	if header != "" {
+		return header
+	}
+	var respBody map[string]any
+	if err := json.Unmarshal(body, &respBody); err != nil {
+		return ""
+	}
+	if nested, ok := respBody["x402"]; ok {
+		if jsonBytes, err := json.Marshal(nested); err == nil {
+			return string(jsonBytes)
+		}
+		return ""
+	}
+	if _, ok := respBody["accepts"]; ok {
+		if jsonBytes, err := json.Marshal(respBody); err == nil {
+			return string(jsonBytes)
 		}
 	}
-	return b.String()
+	return ""
 }
 
 // handlePaymentAndRetry handles a 402 response by signing a payment and retrying.
@@ -566,20 +614,9 @@ func (bc *baseClient) handlePaymentAndRetry(ctx context.Context, url string, bod
 // handlePaymentAndRetryHeaders is handlePaymentAndRetry plus the retry
 // response headers (settlement receipt, gateway metadata).
 func (bc *baseClient) handlePaymentAndRetryHeaders(ctx context.Context, url string, body []byte, resp *http.Response) ([]byte, http.Header, error) {
-	// Get payment required header
-	paymentHeader := resp.Header.Get("payment-required")
-	if paymentHeader == "" {
-		// Try to get from response body
-		var respBody map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&respBody); err == nil {
-			if _, ok := respBody["x402"]; ok {
-				// Response body contains payment info - re-encode as header
-				jsonBytes, _ := json.Marshal(respBody)
-				paymentHeader = string(jsonBytes)
-			}
-		}
-	}
-
+	// Payment requirements: the header if the gateway sent one, else the body.
+	respBody, _ := io.ReadAll(resp.Body)
+	paymentHeader := paymentRequirementsFrom(resp.Header.Get("payment-required"), respBody)
 	if paymentHeader == "" {
 		return nil, nil, &PaymentError{Message: "402 response but no payment requirements found"}
 	}
@@ -590,8 +627,8 @@ func (bc *baseClient) handlePaymentAndRetryHeaders(ctx context.Context, url stri
 		return nil, nil, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
 	}
 
-	// Extract payment details
-	paymentOption, err := ExtractPaymentDetails(paymentReq)
+	// Extract the option this client's chain can sign
+	paymentOption, err := bc.extractPaymentDetails(paymentReq)
 	if err != nil {
 		return nil, nil, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
 	}
