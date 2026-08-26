@@ -149,3 +149,35 @@ func NewPortraitClientSolana(privateKey, rpcURL string, opts ...PortraitClientOp
 	bc.checkEnvAPIURL()
 	return client, nil
 }
+
+// NewSurfClientSolana creates a Surf client paid on Solana.
+//
+// Surf's GET endpoints are paid GETs, so without this constructor a Solana
+// wallet had no way to reach them at all: NewSurfClient goes through
+// newBaseClient, which never sets chain.
+func NewSurfClientSolana(privateKey, rpcURL string, opts ...SurfClientOption) (*SurfClient, error) {
+	bc, err := newSolanaBaseClient(privateKey, "", rpcURL, DefaultTimeout)
+	if err != nil {
+		return nil, err
+	}
+	client := &SurfClient{baseClient: bc}
+	for _, opt := range opts {
+		opt(client)
+	}
+	bc.checkEnvAPIURL()
+	return client, nil
+}
+
+// NewRPCClientSolana creates a multi-chain RPC client paid on Solana.
+func NewRPCClientSolana(privateKey, rpcURL string, opts ...RPCClientOption) (*RPCClient, error) {
+	bc, err := newSolanaBaseClient(privateKey, "", rpcURL, DefaultRPCTimeout)
+	if err != nil {
+		return nil, err
+	}
+	client := &RPCClient{baseClient: bc}
+	for _, opt := range opts {
+		opt(client)
+	}
+	bc.checkEnvAPIURL()
+	return client, nil
+}
