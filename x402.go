@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -225,29 +226,82 @@ func CreatePaymentPayload(
 	return base64.StdEncoding.EncodeToString(jsonData), nil
 }
 
-// ParsePaymentRequired parses the payment-required header from a 402 response.
+// ParsePaymentRequired parses payment requirements from a 402 response.
+//
+// The canonical form is the base64-encoded payment-required header. Some
+// gateways instead carry the requirements as raw JSON in the response body, so
+// a payload that is already JSON is accepted verbatim: base64 has no '{' in its
+// alphabet, which makes the two forms unambiguous.
 func ParsePaymentRequired(headerValue string) (*PaymentRequirement, error) {
-	decoded, err := base64.StdEncoding.DecodeString(headerValue)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode payment required header: %w", err)
+	trimmed := strings.TrimSpace(headerValue)
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty payment required header")
+	}
+
+	raw := []byte(trimmed)
+	if !strings.HasPrefix(trimmed, "{") {
+		decoded, err := base64.StdEncoding.DecodeString(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode payment required header: %w", err)
+		}
+		raw = decoded
 	}
 
 	var req PaymentRequirement
-	if err := json.Unmarshal(decoded, &req); err != nil {
+	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, fmt.Errorf("failed to parse payment required: %w", err)
 	}
 
 	return &req, nil
 }
 
-// ExtractPaymentDetails extracts payment details from a PaymentRequirement.
-// Returns the first payment option if multiple are available.
+// networkChain classifies a 402 option's network string as the chain this SDK
+// would have to sign with, or "" when it recognises neither.
+//
+// Both the short names BlockRun's gateways use ("base", "solana") and the
+// CAIP-2 spellings ("eip155:8453", "solana:5eykt4Us…") are accepted, along with
+// their testnet variants ("base-sepolia", "solana-devnet").
+func networkChain(network string) string {
+	n := strings.ToLower(strings.TrimSpace(network))
+	switch {
+	case n == chainSolana, strings.HasPrefix(n, chainSolana+":"), strings.HasPrefix(n, chainSolana+"-"):
+		return chainSolana
+	case n == chainBase, strings.HasPrefix(n, chainBase+"-"), strings.HasPrefix(n, "eip155:"):
+		return chainBase
+	default:
+		return ""
+	}
+}
+
+// ExtractPaymentDetails extracts payment details from a PaymentRequirement,
+// expressing no chain preference: the first option is used.
+//
+// Clients should prefer ExtractPaymentDetailsForChain — an option this client
+// cannot sign is worse than no option at all.
 func ExtractPaymentDetails(req *PaymentRequirement) (*PaymentOption, error) {
-	if len(req.Accepts) == 0 {
+	return ExtractPaymentDetailsForChain(req, "")
+}
+
+// ExtractPaymentDetailsForChain selects the payment option this client can
+// actually sign and normalises its amount.
+//
+// Ordering in accepts is the server's preference, not the client's capability:
+// a gateway offering [base, solana] used to hand a Solana client the Base
+// option, which then died on "invalid asset mint" with a payable Solana option
+// untouched in accepts[1]. Selection therefore follows chain, falling back to
+// accepts[0] only when no option's network is classifiable — an unrecognised
+// network is not evidence of a mismatch, so it is still attempted.
+//
+// chain is "base", "solana", or "" for no preference.
+func ExtractPaymentDetailsForChain(req *PaymentRequirement, chain string) (*PaymentOption, error) {
+	if req == nil || len(req.Accepts) == 0 {
 		return nil, fmt.Errorf("no payment options in payment required response")
 	}
 
-	option := req.Accepts[0]
+	option, err := selectPaymentOption(req.Accepts, chain)
+	if err != nil {
+		return nil, err
+	}
 
 	// Support both v1 (maxAmountRequired) and v2 (amount) formats
 	if option.Amount == "" {
@@ -260,5 +314,43 @@ func ExtractPaymentDetails(req *PaymentRequirement) (*PaymentOption, error) {
 		return nil, fmt.Errorf("no amount found in payment requirements")
 	}
 
-	return &option, nil
+	return option, nil
+}
+
+// selectPaymentOption returns a copy of the first option payable on chain, or
+// an error naming the mismatch when every option belongs to another chain.
+func selectPaymentOption(accepts []PaymentOption, chain string) (*PaymentOption, error) {
+	if chain == "" {
+		option := accepts[0]
+		return &option, nil
+	}
+
+	unknown := -1
+	for i := range accepts {
+		switch networkChain(accepts[i].Network) {
+		case chain:
+			option := accepts[i]
+			return &option, nil
+		case "":
+			if unknown < 0 {
+				unknown = i
+			}
+		}
+	}
+
+	// Nothing matched. An unrecognised network is not evidence of a mismatch —
+	// it may well be payable — so try it before declaring one.
+	if unknown >= 0 {
+		option := accepts[unknown]
+		return &option, nil
+	}
+
+	offered := make([]string, 0, len(accepts))
+	for i := range accepts {
+		offered = append(offered, strconv.Quote(accepts[i].Network))
+	}
+	return nil, fmt.Errorf(
+		"client is configured for %s but the 402 only offers %s",
+		chain, strings.Join(offered, ", "),
+	)
 }
