@@ -13,6 +13,7 @@ package blockrun
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
@@ -332,6 +333,13 @@ func deriveATA(owner, tokenProgram, mint solana.PublicKey) (solana.PublicKey, er
 
 // solanaRPCCall performs a single JSON-RPC call and decodes result into out.
 func solanaRPCCall(rpcURL, method string, params []any, out any) error {
+	return solanaRPCCallContext(context.Background(), rpcURL, method, params, out)
+}
+
+// solanaRPCCallContext is solanaRPCCall with caller-supplied cancellation, for
+// the paths that have a context to honour (balance reads). The signing paths
+// are called from places without one and go through solanaRPCCall.
+func solanaRPCCallContext(ctx context.Context, rpcURL, method string, params []any, out any) error {
 	reqBody, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -341,7 +349,7 @@ func solanaRPCCall(rpcURL, method string, params []any, out any) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost, rpcURL, bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rpcURL, bytes.NewReader(reqBody))
 	if err != nil {
 		return err
 	}
