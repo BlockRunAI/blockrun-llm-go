@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,10 +39,10 @@ type rpcRequest struct {
 
 // rpcResponse is the JSON-RPC response payload.
 type rpcResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Result  string      `json:"result,omitempty"`
-	Error   *rpcError   `json:"error,omitempty"`
+	JSONRPC string    `json:"jsonrpc"`
+	ID      int       `json:"id"`
+	Result  string    `json:"result,omitempty"`
+	Error   *rpcError `json:"error,omitempty"`
 }
 
 // rpcError is the JSON-RPC error object.
@@ -49,14 +51,94 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-// GetBalance queries the USDC balance on Base mainnet for the client's wallet address.
+// GetBalance queries the client's USDC balance on the chain it pays from:
+// Base mainnet for a Base client, Solana mainnet for a Solana one.
+//
+// It used to read the Base USDC contract unconditionally, so a Solana client
+// fed its bs58 pubkey into an eth_call against public Base RPCs — which either
+// errors or answers about an address that is not the caller's.
 func (c *LLMClient) GetBalance(ctx context.Context) (float64, error) {
+	if c.isSolana() {
+		return getSolanaUSDCBalance(ctx, c.solanaRPCURL, c.address)
+	}
 	return getUSDCBalance(ctx, c.address, USDCBaseContract, baseMainnetRPCs)
 }
 
-// GetBalanceTestnet queries the USDC balance on Base Sepolia testnet for the client's wallet address.
+// GetBalanceTestnet queries the USDC balance on Base Sepolia testnet.
+//
+// Base only: there is no configured Solana devnet USDC mint, so a Solana client
+// gets an explicit error rather than a reading from the wrong chain.
 func (c *LLMClient) GetBalanceTestnet(ctx context.Context) (float64, error) {
+	if c.isSolana() {
+		return 0, &ValidationError{
+			Field:   "chain",
+			Message: "GetBalanceTestnet reads Base Sepolia; this client pays on Solana and no devnet USDC mint is configured. Use GetBalance for Solana mainnet.",
+		}
+	}
 	return getUSDCBalance(ctx, c.address, USDCBaseTestnet, baseSepoliaRPCs)
+}
+
+// getSolanaUSDCBalance sums the client's USDC across every SPL token account
+// the owner holds for the mint.
+//
+// One owner can hold more than one token account for a single mint (the
+// associated account plus any auxiliary ones), so reading only the first
+// under-reports the balance. Amounts are summed in raw base units and scaled
+// once, rather than converted per account, to keep the rounding to a single
+// step. Decimals come from the RPC rather than being assumed: they are fixed
+// per mint, so the first account's value describes them all.
+//
+// A wallet that has never held USDC has no token account at all. That is a zero
+// balance, not an error.
+func getSolanaUSDCBalance(ctx context.Context, rpcURL, owner string) (float64, error) {
+	if rpcURL == "" {
+		rpcURL = DefaultSolanaRPCURL
+	}
+
+	var res struct {
+		Value []struct {
+			Account struct {
+				Data struct {
+					Parsed struct {
+						Info struct {
+							TokenAmount struct {
+								Amount   string `json:"amount"`
+								Decimals int    `json:"decimals"`
+							} `json:"tokenAmount"`
+						} `json:"info"`
+					} `json:"parsed"`
+				} `json:"data"`
+			} `json:"account"`
+		} `json:"value"`
+	}
+
+	params := []any{
+		owner,
+		map[string]string{"mint": USDCSolanaMainnet},
+		map[string]string{"encoding": "jsonParsed", "commitment": "confirmed"},
+	}
+	if err := solanaRPCCallContext(ctx, rpcURL, "getTokenAccountsByOwner", params, &res); err != nil {
+		return 0, fmt.Errorf("failed to read Solana USDC balance: %w", err)
+	}
+
+	var rawTotal int64
+	decimals := int(usdcSolanaDecimals)
+	for _, acc := range res.Value {
+		amount := acc.Account.Data.Parsed.Info.TokenAmount
+		if amount.Amount == "" {
+			continue
+		}
+		raw, err := strconv.ParseInt(amount.Amount, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("unparseable token amount %q from RPC: %w", amount.Amount, err)
+		}
+		rawTotal += raw
+		if amount.Decimals > 0 {
+			decimals = amount.Decimals
+		}
+	}
+
+	return float64(rawTotal) / math.Pow10(decimals), nil
 }
 
 // getUSDCBalance queries the USDC balance for an address using the balanceOf selector.

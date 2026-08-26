@@ -2,6 +2,45 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## Unreleased
+
+- **fix(solana): `GetBalance` reads the chain the client actually pays from.**
+  It called `getUSDCBalance` against the Base USDC contract unconditionally, so
+  a Solana client fed its bs58 pubkey into an `eth_call` on public Base RPCs.
+  That never touched `solanaRPCURL` and never reported the caller's balance —
+  it errored or answered about an address that was not theirs, on a chain the
+  client does not pay from. `GetBalance` now branches on chain and reads the
+  USDC SPL mint over Solana RPC, summing every token account the owner holds
+  for that mint (one owner can hold more than one, so reading only the first
+  under-reports). A wallet with no token account reads 0 rather than erroring.
+  `GetBalanceTestnet` stays Base Sepolia and now returns an explicit error on a
+  Solana client instead of querying the wrong chain. Adds
+  `solanaRPCCallContext` so the balance read honours the caller's context.
+
+- **feat(solana): wallet management reaches parity with the EVM side.**
+  `wallet.go` exported thirteen helpers; `solana_wallet.go` had two, and both
+  only loaded an existing key. A Solana user could pay with a key they already
+  held but could not mint a wallet, persist one, discover one another provider
+  wrote, or get a funding link out of the SDK. Adds `CreateSolanaWallet`,
+  `SaveSolanaWallet`, `GetOrCreateSolanaWallet`,
+  `GetSolanaWalletAddressFromEnvOrFile`, `ScanSolanaWallets`,
+  `GetSolanaPaymentLinks`, `GetSolanaPayURI`, and the three
+  `FormatSolana*Message` funding helpers, with keys written 0600 to
+  `~/.blockrun/.solana-session` as on the EVM side. `GetSolanaPayURI` is
+  deliberately not a mirror of `GetEIP681URI`: EIP-681 encodes a uint256 in
+  base units and Solana Pay a decimal token amount, so copying the EVM
+  convention would have asked users for a million times the intended amount.
+  `Onramp` stays Base-only — whether the gateway accepts a Solana network is a
+  server-side question, so it is left alone rather than guessed at.
+
+- **docs: the payment and security sections are chain-accurate.** "How Payment
+  Works" and Security predated Solana support and read as if Base were the only
+  chain — funding said USDC on Base, the flow claimed every signature was
+  EIP-712, and on-chain verification pointed only at Basescan. Both now cover
+  Solana's ed25519 `TransferChecked` with the facilitator as fee payer, and
+  name the two helpers that are genuinely Base-only (`Onramp`,
+  `GetBalanceTestnet`).
+
 ## 0.19.6
 
 - **fix(x402): payment options are selected by chain, not by server ordering.**
