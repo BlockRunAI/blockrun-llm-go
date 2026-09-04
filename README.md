@@ -1,6 +1,6 @@
 # BlockRun Go SDK
 
-> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->76<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request in USDC over the x402 protocol, on **Base or Solana**. No API keys required — your wallet signature is your authentication.
+> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->76<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Use **account API keys**, or pay per request in USDC over x402 on **Solana or Base**.
 >
 > The module keeps the name `blockrun-llm-go` because in Go the repository name *is* the import path, and renaming it would break every existing consumer. The SDK stopped being LLM-only long before v0.19.
 >
@@ -14,6 +14,36 @@
 ```bash
 go get github.com/BlockRunAI/blockrun-llm-go
 ```
+
+## Account API keys
+
+Register at [user.blockrun.ai](https://user.blockrun.ai), create an
+[API key](https://user.blockrun.ai/dashboard/keys), and add
+[credits](https://user.blockrun.ai/dashboard/credits).
+
+```bash
+export BLOCKRUN_API_KEY="brk_live_..."
+```
+
+All client families have a `NewXClientWithAPIKey(key, opts...)` constructor,
+including LLM, Anthropic, image, video, music, speech, voice, phone, portrait,
+RealFace, Surf, and RPC. An empty key reads `BLOCKRUN_API_KEY`. Existing Base and
+Solana constructors also use this environment key when their private-key
+argument is empty; an explicit private key preserves wallet mode.
+
+The account endpoint defaults to `https://api.blockrun.ai/v1`. Set
+`BLOCKRUN_API_BASE_URL` or the client's `With*APIURL` option to override it
+(`/v1` is optional). Account mode creates no wallet, sends no payment signatures,
+and never retries a credit error as a wallet payment. Streaming, tools, media
+and task polling share account authentication. Redirects and cross-origin key
+forwarding are blocked. `APIError` preserves status, safe error fields and
+`RetryAfter` (use `errors.As` through wrapped errors).
+
+For Responses, other account endpoints, or raw SSE, use `client.APIRequest(ctx,
+method, path, body)`. Close the returned response body. Account usage and balance
+are in the portal: `GetBalance` and `GetCostSummary` return an explanatory error,
+`GetWalletAddress` returns an empty string, and `GetSpending` marks its wallet-only
+counters with `AuthMode: "api-key"`. Account calls bypass wallet caches.
 
 ## Quick Start
 
@@ -31,7 +61,7 @@ import (
 func main() {
     ctx := context.Background()
 
-    client, err := blockrun.NewLLMClient("")  // uses BASE_CHAIN_WALLET_KEY env var
+    client, err := blockrun.NewLLMClientWithAPIKey("") // uses BLOCKRUN_API_KEY
     if err != nil {
         log.Fatal(err)
     }
@@ -43,6 +73,17 @@ func main() {
     fmt.Println(response)
 }
 ```
+
+### Wallet setup: Solana first
+
+```go
+client, err := blockrun.SetupAgentClient("")
+```
+
+Uses account mode when `BLOCKRUN_API_KEY` is set. Otherwise preserves a saved
+chain or existing Base-only wallet, and defaults new wallets to Solana. Pass
+`"base"` or `"solana"` to choose explicitly. Existing chain-specific constructors
+and `SetupAgentWallet` keep their wallet behavior.
 
 ### Try It Free (No USDC Required)
 

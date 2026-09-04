@@ -67,7 +67,9 @@ func NewSurfClient(privateKey string, opts ...SurfClientOption) (*SurfClient, er
 		opt(client)
 	}
 
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 

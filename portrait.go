@@ -71,7 +71,9 @@ func NewPortraitClient(privateKey string, opts ...PortraitClientOption) (*Portra
 		opt(client)
 	}
 
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 
 	return client, nil
 }

@@ -104,7 +104,9 @@ func NewVideoClient(privateKey string, opts ...VideoClientOption) (*VideoClient,
 		opt(client)
 	}
 
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 
 	return client, nil
 }
@@ -359,6 +361,17 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 	}
 	body1, _ := io.ReadAll(resp1.Body)
 	resp1.Body.Close()
+	if c.apiKey != "" {
+		data, err := c.pollAccount(ctx, body1, resp1.StatusCode, 15*time.Minute, c.pollInterval)
+		if err != nil {
+			return nil, err
+		}
+		var result VideoResponse
+		if err := json.Unmarshal(data, &result); err != nil {
+			return nil, err
+		}
+		return &result, nil
+	}
 
 	if resp1.StatusCode != http.StatusPaymentRequired {
 		return nil, &APIError{

@@ -19,7 +19,9 @@ func NewLLMClientSolana(privateKey, rpcURL string, opts ...ClientOption) (*LLMCl
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -34,7 +36,9 @@ func NewAnthropicClientSolana(privateKey, rpcURL string, opts ...AnthropicClient
 	for _, opt := range opts {
 		opt(c)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -48,7 +52,9 @@ func NewImageClientSolana(privateKey, rpcURL string, opts ...ImageClientOption) 
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -62,7 +68,9 @@ func NewVideoClientSolana(privateKey, rpcURL string, opts ...VideoClientOption) 
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -76,7 +84,9 @@ func NewSpeechClientSolana(privateKey, rpcURL string, opts ...SpeechClientOption
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -90,7 +100,9 @@ func NewMusicClientSolana(privateKey, rpcURL string, opts ...MusicClientOption) 
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -104,7 +116,9 @@ func NewVoiceClientSolana(privateKey, rpcURL string, opts ...VoiceClientOption) 
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -118,7 +132,9 @@ func NewPhoneClientSolana(privateKey, rpcURL string, opts ...PhoneClientOption) 
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -132,7 +148,9 @@ func NewRealFaceClientSolana(privateKey, rpcURL string, opts ...RealFaceClientOp
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -146,7 +164,9 @@ func NewPortraitClientSolana(privateKey, rpcURL string, opts ...PortraitClientOp
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -164,7 +184,9 @@ func NewSurfClientSolana(privateKey, rpcURL string, opts ...SurfClientOption) (*
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -178,6 +200,8 @@ func NewRPCClientSolana(privateKey, rpcURL string, opts ...RPCClientOption) (*RP
 	for _, opt := range opts {
 		opt(client)
 	}
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }

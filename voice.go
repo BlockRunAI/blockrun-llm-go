@@ -89,7 +89,9 @@ func NewVoiceClient(privateKey string, opts ...VoiceClientOption) (*VoiceClient,
 		opt(client)
 	}
 
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 

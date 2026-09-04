@@ -70,7 +70,9 @@ func NewAnthropicClient(privateKey string, opts ...AnthropicClientOption) (*Anth
 		opt(c)
 	}
 
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 
 	return c, nil
 }

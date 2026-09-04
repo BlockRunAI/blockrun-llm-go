@@ -171,7 +171,9 @@ func NewRPCClient(privateKey string, opts ...RPCClientOption) (*RPCClient, error
 		opt(client)
 	}
 
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 
 	return client, nil
 }

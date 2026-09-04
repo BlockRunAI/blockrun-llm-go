@@ -311,6 +311,7 @@ type TransferAuthorization struct {
 
 // APIError represents an error from the BlockRun API.
 type APIError struct {
+	RetryAfter string
 	StatusCode int
 	Message    string
 	Body       map[string]any

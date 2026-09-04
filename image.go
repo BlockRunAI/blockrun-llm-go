@@ -97,7 +97,9 @@ func NewImageClient(privateKey string, opts ...ImageClientOption) (*ImageClient,
 	}
 
 	// Check for custom API URL in environment (after options so user-set URLs win)
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 
 	return client, nil
 }
@@ -268,6 +270,17 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 	}
 	body1, _ := io.ReadAll(resp1.Body)
 	resp1.Body.Close()
+	if c.apiKey != "" {
+		data, err := c.pollAccount(ctx, body1, resp1.StatusCode, 15*time.Minute, c.pollInterval)
+		if err != nil {
+			return nil, err
+		}
+		var result ImageResponse
+		if err := json.Unmarshal(data, &result); err != nil {
+			return nil, err
+		}
+		return &result, nil
+	}
 
 	// Free/proxy path: the server answered without requiring payment.
 	if resp1.StatusCode == http.StatusOK {

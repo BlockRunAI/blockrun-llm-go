@@ -84,7 +84,9 @@ func NewRealFaceClient(privateKey string, opts ...RealFaceClientOption) (*RealFa
 		opt(client)
 	}
 
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 
 	return client, nil
 }

@@ -49,6 +49,8 @@ type LLMClient struct {
 
 // Spending represents session spending information.
 type Spending struct {
+	// AuthMode identifies wallet-only counters; account billing is in the portal.
+	AuthMode string
 	TotalUSD float64
 	Calls    int
 }
@@ -111,7 +113,9 @@ func NewLLMClient(privateKey string, opts ...ClientOption) (*LLMClient, error) {
 	}
 
 	// Check for custom API URL in environment (after options so user-set URLs win)
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 
 	return client, nil
 }
@@ -212,6 +216,9 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, model string, messages [
 
 // GetCostSummary returns an aggregate summary of all costs logged to the persistent JSONL file.
 func (c *LLMClient) GetCostSummary() (*CostSummary, error) {
+	if c.apiKey != "" {
+		return nil, fmt.Errorf("account usage is available at %s/dashboard", AccountPortalURL)
+	}
 	return c.costLog.Summary()
 }
 

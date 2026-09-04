@@ -24,6 +24,7 @@ import (
 // "solana" the client pays USDC on Solana instead: privateKey is nil, solanaKey
 // holds the bs58 signing key, and address is the bs58 public key.
 type baseClient struct {
+	apiKey          string
 	privateKey      *ecdsa.PrivateKey
 	address         string
 	apiURL          string
@@ -83,6 +84,9 @@ func (bc *baseClient) hasWallet() bool {
 // If privateKey is empty, it checks BLOCKRUN_WALLET_KEY then BASE_CHAIN_WALLET_KEY env vars.
 // If apiURL is empty, DefaultAPIURL is used; BLOCKRUN_API_URL env var can override.
 func newBaseClient(privateKey, apiURL string, timeout time.Duration) (*baseClient, error) {
+	if privateKey == "" && os.Getenv("BLOCKRUN_API_KEY") != "" {
+		return newAccountBaseClient("", "", timeout)
+	}
 	// Get private key from param or environment
 	key := privateKey
 	if key == "" {
@@ -134,6 +138,9 @@ func newBaseClient(privateKey, apiURL string, timeout time.Duration) (*baseClien
 // DefaultSolanaAPIURL is used; BLOCKRUN_SOLANA_API_URL can override. If rpcURL is
 // empty, DefaultSolanaRPCURL is used; SOLANA_RPC_URL can override.
 func newSolanaBaseClient(solanaKey, apiURL, rpcURL string, timeout time.Duration) (*baseClient, error) {
+	if solanaKey == "" && os.Getenv("BLOCKRUN_API_KEY") != "" {
+		return newAccountBaseClient("", "", timeout)
+	}
 	key := solanaKey
 	if key == "" {
 		loaded, err := LoadSolanaWallet()
@@ -177,16 +184,20 @@ func newSolanaBaseClient(solanaKey, apiURL, rpcURL string, timeout time.Duration
 
 // checkEnvAPIURL overrides apiURL with the chain's API-URL env var if still at
 // the chain default. Called after options are applied so user-set URLs win.
-func (bc *baseClient) checkEnvAPIURL() {
+func (bc *baseClient) checkEnvAPIURL() error {
+	if bc.apiKey != "" {
+		return bc.configureAccount()
+	}
 	if bc.isSolana() {
 		if envURL := os.Getenv("BLOCKRUN_SOLANA_API_URL"); envURL != "" && bc.apiURL == DefaultSolanaAPIURL {
 			bc.apiURL = strings.TrimSuffix(envURL, "/")
 		}
-		return
+		return nil
 	}
 	if envURL := os.Getenv("BLOCKRUN_API_URL"); envURL != "" && bc.apiURL == DefaultAPIURL {
 		bc.apiURL = strings.TrimSuffix(envURL, "/")
 	}
+	return nil
 }
 
 // pollPaymentPayload returns the PAYMENT-SIGNATURE to attach to an async poll.
@@ -265,6 +276,7 @@ func (bc *baseClient) GetSpending() Spending {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 	return Spending{
+		AuthMode: bc.AuthMode(),
 		TotalUSD: bc.sessionTotalUSD,
 		Calls:    bc.sessionCalls,
 	}
@@ -283,7 +295,7 @@ func (bc *baseClient) doRequest(ctx context.Context, endpoint string, body map[s
 // response was served from the local cache.
 func (bc *baseClient) doRequestHeaders(ctx context.Context, endpoint string, body map[string]any) ([]byte, http.Header, error) {
 	// Check cache before making request
-	if bc.cache != nil {
+	if bc.apiKey == "" && bc.cache != nil {
 		if cached, ok := bc.cache.Get(endpoint, body); ok {
 			return cached, nil, nil
 		}
@@ -310,6 +322,15 @@ func (bc *baseClient) doRequestHeaders(ctx context.Context, endpoint string, bod
 	}
 	defer resp.Body.Close()
 
+	if bc.apiKey != "" {
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, nil, err
+		}
+		data, err = bc.pollAccount(ctx, data, resp.StatusCode, 15*time.Minute, 2*time.Second)
+		return data, resp.Header, err
+	}
+
 	// Handle 402 Payment Required
 	if resp.StatusCode == http.StatusPaymentRequired {
 		return bc.handlePaymentAndRetryHeaders(ctx, url, jsonBody, resp)
@@ -331,7 +352,7 @@ func (bc *baseClient) doRequestHeaders(ctx context.Context, endpoint string, bod
 	}
 
 	// Store in cache
-	if bc.cache != nil {
+	if bc.apiKey == "" && bc.cache != nil {
 		bc.cache.Set(endpoint, body, data)
 	}
 
@@ -341,7 +362,7 @@ func (bc *baseClient) doRequestHeaders(ctx context.Context, endpoint string, bod
 // doGet makes a GET request to the given endpoint and returns raw response bytes.
 func (bc *baseClient) doGet(ctx context.Context, endpoint string) ([]byte, error) {
 	// Check cache before making request
-	if bc.cache != nil {
+	if bc.apiKey == "" && bc.cache != nil {
 		if cached, ok := bc.cache.Get(endpoint, nil); ok {
 			return cached, nil
 		}
@@ -374,7 +395,7 @@ func (bc *baseClient) doGet(ctx context.Context, endpoint string) ([]byte, error
 	}
 
 	// Store in cache
-	if bc.cache != nil {
+	if bc.apiKey == "" && bc.cache != nil {
 		bc.cache.Set(endpoint, nil, data)
 	}
 
@@ -404,7 +425,7 @@ func cacheQueryBody(query map[string]string) map[string]any {
 // this path costs real USDC, not just latency.
 func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, query map[string]string) ([]byte, error) {
 	cacheBody := cacheQueryBody(query)
-	if bc.cache != nil {
+	if bc.apiKey == "" && bc.cache != nil {
 		if cached, ok := bc.cache.Get(endpoint, cacheBody); ok {
 			return cached, nil
 		}
@@ -439,7 +460,7 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 		if err != nil {
 			return nil, err
 		}
-		if bc.cache != nil {
+		if bc.apiKey == "" && bc.cache != nil {
 			bc.cache.Set(endpoint, cacheBody, data)
 		}
 		return data, nil
@@ -457,7 +478,7 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 	if err != nil {
 		return nil, err
 	}
-	if bc.cache != nil {
+	if bc.apiKey == "" && bc.cache != nil {
 		bc.cache.Set(endpoint, cacheBody, data)
 	}
 	return data, nil

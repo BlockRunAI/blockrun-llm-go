@@ -76,7 +76,9 @@ func NewMusicClient(privateKey string, opts ...MusicClientOption) (*MusicClient,
 		opt(client)
 	}
 
-	bc.checkEnvAPIURL()
+	if err := bc.checkEnvAPIURL(); err != nil {
+		return nil, err
+	}
 
 	return client, nil
 }
