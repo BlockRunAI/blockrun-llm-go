@@ -262,6 +262,7 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req1.Header.Set("Content-Type", "application/json")
+	c.applyAuth(req1)
 	resp1, err := c.httpClient.Do(req1)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -271,8 +272,27 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 
 	// Free/proxy path: the server answered without requiring payment.
 	if resp1.StatusCode == http.StatusOK {
+		c.recordAPIKeyCost(body1, endpoint)
 		return decodeImageResponse(body1, resp1.Header)
 	}
+
+	// Account rail: the API key IS the payment, so there is no 402 round trip.
+	// The submit answers 200 (handled above) or 202, and the same poll loop
+	// runs with the key in place of a signature. A 402 here is the account
+	// being out of credit — a refusal, not a challenge.
+	if c.isAPIKey() {
+		if resp1.StatusCode == http.StatusPaymentRequired {
+			return nil, apiKeyPaymentError(body1)
+		}
+		if resp1.StatusCode != http.StatusAccepted {
+			return nil, &APIError{
+				StatusCode: resp1.StatusCode,
+				Message:    fmt.Sprintf("API error: %s", string(body1)),
+			}
+		}
+		return c.pollImageJob(ctx, endpoint, body1, resp1.StatusCode, nil)
+	}
+
 	if resp1.StatusCode != http.StatusPaymentRequired {
 		return nil, &APIError{
 			StatusCode: resp1.StatusCode,
@@ -339,27 +359,62 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 		}
 	}
 
+	return c.pollImageJob(ctx, endpoint, body2, resp2.StatusCode, &imagePayment{
+		option:      paymentOption,
+		payload:     paymentPayload,
+		resourceURL: resourceURL,
+		description: paymentReq.Resource.Description,
+		extensions:  paymentReq.Extensions,
+	})
+}
+
+// imagePayment carries the x402 context a poll loop needs to keep re-proving
+// payment. It is nil on the account rail, where the API key does that job and
+// there is nothing to re-sign.
+type imagePayment struct {
+	option      *PaymentOption
+	payload     string
+	resourceURL string
+	description string
+	extensions  map[string]any
+}
+
+// pollImageJob GET-polls an async image job to a terminal state.
+//
+// Both rails share it because the loop is the same shape on each: submit
+// returned 202 { id, poll_url }, and the job is polled until the gateway
+// reports completed or failed. What differs is only how each poll authenticates
+// — a PAYMENT-SIGNATURE the wallet keeps fresh, or the API key — and where the
+// charge comes from, which is why `pay` is a parameter rather than a branch
+// inside the loop body.
+//
+// On the wallet rail the gateway settles USDC on the first poll that observes
+// "completed", so the cost is recorded exactly there. On the account rail the
+// completed payload carries its own price and recordAPIKeyCost books that.
+func (c *ImageClient) pollImageJob(
+	ctx context.Context,
+	endpoint string,
+	submitBody []byte,
+	submitStatus int,
+	pay *imagePayment,
+) (*ImageResponse, error) {
 	var submitData struct {
 		ID      string `json:"id"`
 		PollURL string `json:"poll_url"`
 		Status  string `json:"status"`
 	}
-	if err := json.Unmarshal(body2, &submitData); err != nil {
+	if err := json.Unmarshal(submitBody, &submitData); err != nil {
 		return nil, fmt.Errorf("failed to decode submit response: %w", err)
 	}
 	if submitData.ID == "" || submitData.PollURL == "" {
 		return nil, &APIError{
-			StatusCode: resp2.StatusCode,
-			Message:    fmt.Sprintf("submit response missing id/poll_url: %s", string(body2)),
+			StatusCode: submitStatus,
+			Message:    fmt.Sprintf("submit response missing id/poll_url: %s", string(submitBody)),
 		}
 	}
 
 	pollURL := c.resolvePollURL(submitData.PollURL)
 
-	// Step 4: poll with the same PAYMENT-SIGNATURE until terminal. The
-	// gateway enforces wallet binding (not signature equality), so reusing
-	// the submit signature is valid and settles exactly once, on the first
-	// poll that observes "completed".
 	deadline := time.Now().Add(imagePollBudget)
 	lastStatus := submitData.Status
 	if lastStatus == "" {
@@ -367,7 +422,10 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 	}
 	// Base reuses the submit signature across polls; Solana re-signs with a fresh
 	// blockhash once the current one nears expiry (see pollPaymentPayload).
-	pollSig := paymentPayload
+	var pollSig string
+	if pay != nil {
+		pollSig = pay.payload
+	}
 	lastSigned := time.Now()
 
 	for time.Now().Before(deadline) {
@@ -381,14 +439,21 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 		if err != nil {
 			return nil, fmt.Errorf("failed to create poll request: %w", err)
 		}
-		pollSig, lastSigned = c.pollPaymentPayload(pollSig, lastSigned, paymentOption, resourceURL, paymentReq.Resource.Description, paymentReq.Extensions)
-		pollReq.Header.Set("PAYMENT-SIGNATURE", pollSig)
+		if pay != nil {
+			pollSig, lastSigned = c.pollPaymentPayload(pollSig, lastSigned, pay.option, pay.resourceURL, pay.description, pay.extensions)
+			pollReq.Header.Set("PAYMENT-SIGNATURE", pollSig)
+		}
+		c.applyAuth(pollReq)
 		pollResp, err := c.httpClient.Do(pollReq)
 		if err != nil {
 			return nil, fmt.Errorf("poll request failed: %w", err)
 		}
 		pollBytes, _ := io.ReadAll(pollResp.Body)
 		pollResp.Body.Close()
+
+		if pollResp.StatusCode == http.StatusPaymentRequired && pay == nil {
+			return nil, apiKeyPaymentError(pollBytes)
+		}
 
 		var pollData map[string]any
 		_ = json.Unmarshal(pollBytes, &pollData)
@@ -400,9 +465,16 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 			continue
 		}
 		if lastStatus == "failed" {
+			// The parenthetical is a wallet-rail fact: settlement waits for a
+			// completed poll, so a failed job costs nothing. Credit is taken at
+			// submit, so the account rail does not get to claim it.
+			note := " (no payment was taken)"
+			if pay == nil {
+				note = ""
+			}
 			return nil, &APIError{
 				StatusCode: pollResp.StatusCode,
-				Message:    fmt.Sprintf("Upstream generation failed (no payment was taken): %s", string(pollBytes)),
+				Message:    fmt.Sprintf("Upstream generation failed%s: %s", note, string(pollBytes)),
 			}
 		}
 		// Terminal success is keyed on status, NOT the HTTP code — the
@@ -410,7 +482,11 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 		// the charge is irreversible at that point. Record the cost as soon
 		// as completion is observed, then decode.
 		if lastStatus == "completed" {
-			c.recordSettledCost(paymentOption.Amount, endpoint)
+			if pay != nil {
+				c.recordSettledCost(pay.option.Amount, endpoint)
+			} else {
+				c.recordAPIKeyCost(pollBytes, endpoint)
+			}
 			return decodeImageResponse(pollBytes, pollResp.Header)
 		}
 		// 504 on a poll = transient upstream hiccup; keep polling. Any other
@@ -425,11 +501,17 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 		}
 	}
 
+	// Same caveat as the video poll: only the wallet rail defers settlement to
+	// the first completed poll, so only there is giving up free.
+	unpaid := " No payment was taken."
+	if pay == nil {
+		unpaid = ""
+	}
 	return nil, &APIError{
 		StatusCode: http.StatusGatewayTimeout,
 		Message: fmt.Sprintf(
-			"Image generation did not complete within %.0fs (last status: %s). No payment was taken.",
-			imagePollBudget.Seconds(), lastStatus,
+			"Image generation did not complete within %.0fs (last status: %s).%s",
+			imagePollBudget.Seconds(), lastStatus, unpaid,
 		),
 	}
 }

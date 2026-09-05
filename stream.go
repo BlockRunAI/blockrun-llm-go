@@ -157,6 +157,7 @@ func (c *LLMClient) ChatCompletionStream(ctx context.Context, model string, mess
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	c.applyAuth(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -166,6 +167,10 @@ func (c *LLMClient) ChatCompletionStream(ctx context.Context, model string, mess
 	// Handle 402 Payment Required
 	if resp.StatusCode == http.StatusPaymentRequired {
 		defer resp.Body.Close()
+		if c.isAPIKey() {
+			refusal, _ := io.ReadAll(resp.Body)
+			return nil, apiKeyPaymentError(refusal)
+		}
 		return c.handleStreamPaymentAndRetry(ctx, url, jsonBody, resp)
 	}
 

@@ -34,6 +34,12 @@ type baseClient struct {
 	sessionCalls    int
 	costLog         *CostLog
 
+	// apiKey is a BlockRun API key (brk_...). When set the client is on the
+	// account rail: requests carry it as a Bearer token to api.blockrun.ai and
+	// draw prepaid credit, privateKey/solanaKey are nil, and nothing is signed
+	// locally. See apikey.go.
+	apiKey string
+
 	// chain is "base" (default) or "solana".
 	chain string
 	// solanaKey is the bs58 Solana signing key (only set when chain == "solana").
@@ -72,6 +78,9 @@ func (bc *baseClient) extractPaymentDetails(req *PaymentRequirement) (*PaymentOp
 // and leaves privateKey nil, so a privateKey-only check silently locks Solana
 // clients out of every paid endpoint.
 func (bc *baseClient) hasWallet() bool {
+	if bc.isAPIKey() {
+		return false
+	}
 	if bc.isSolana() {
 		return bc.solanaKey != ""
 	}
@@ -83,6 +92,19 @@ func (bc *baseClient) hasWallet() bool {
 // If privateKey is empty, it checks BLOCKRUN_WALLET_KEY then BASE_CHAIN_WALLET_KEY env vars.
 // If apiURL is empty, DefaultAPIURL is used; BLOCKRUN_API_URL env var can override.
 func newBaseClient(privateKey, apiURL string, timeout time.Duration) (*baseClient, error) {
+	// The account rail is checked first, and before any wallet variable is
+	// read: an API key is a complete credential on its own, so demanding a
+	// private key alongside it would make every API-key user invent a wallet
+	// they never use. apiURL is honoured when the caller passed one so a
+	// self-hosted account gateway still works.
+	if key := resolveAPIKey(privateKey); key != "" {
+		bc := newAPIKeyBaseClient(key, timeout)
+		if apiURL != "" {
+			bc.apiURL = strings.TrimSuffix(apiURL, "/")
+		}
+		return bc, nil
+	}
+
 	// Get private key from param or environment
 	key := privateKey
 	if key == "" {
@@ -134,6 +156,18 @@ func newBaseClient(privateKey, apiURL string, timeout time.Duration) (*baseClien
 // DefaultSolanaAPIURL is used; BLOCKRUN_SOLANA_API_URL can override. If rpcURL is
 // empty, DefaultSolanaRPCURL is used; SOLANA_RPC_URL can override.
 func newSolanaBaseClient(solanaKey, apiURL, rpcURL string, timeout time.Duration) (*baseClient, error) {
+	// An API key answers the chain question rather than being answered by it:
+	// api.blockrun.ai settles from credit, so there is no Solana transfer to
+	// sign and no reason for NewXClientSolana to refuse the key. rpcURL is
+	// dropped on purpose — nothing on this rail needs a blockhash.
+	if key := resolveAPIKey(solanaKey); key != "" {
+		bc := newAPIKeyBaseClient(key, timeout)
+		if apiURL != "" {
+			bc.apiURL = strings.TrimSuffix(apiURL, "/")
+		}
+		return bc, nil
+	}
+
 	key := solanaKey
 	if key == "" {
 		loaded, err := LoadSolanaWallet()
@@ -178,6 +212,14 @@ func newSolanaBaseClient(solanaKey, apiURL, rpcURL string, timeout time.Duration
 // checkEnvAPIURL overrides apiURL with the chain's API-URL env var if still at
 // the chain default. Called after options are applied so user-set URLs win.
 func (bc *baseClient) checkEnvAPIURL() {
+	// BLOCKRUN_API_URL / BLOCKRUN_SOLANA_API_URL name x402 gateways. An
+	// API-key client sends its key to whatever host it is pointed at, so
+	// following those here would leak the key to a host the developer set for
+	// an entirely different rail. EnvAPIKeyURL is the override for this one,
+	// and newAPIKeyBaseClient already applied it.
+	if bc.isAPIKey() {
+		return
+	}
 	if bc.isSolana() {
 		if envURL := os.Getenv("BLOCKRUN_SOLANA_API_URL"); envURL != "" && bc.apiURL == DefaultSolanaAPIURL {
 			bc.apiURL = strings.TrimSuffix(envURL, "/")
@@ -255,12 +297,27 @@ func (bc *baseClient) signPayment(option *PaymentOption, resourceURL, descriptio
 	)
 }
 
-// GetWalletAddress returns the wallet address being used for payments.
+// GetWalletAddress returns the wallet address being used for payments, or the
+// empty string on the account rail, where payments come from prepaid credit and
+// there is no address.
 func (bc *baseClient) GetWalletAddress() string {
 	return bc.address
 }
 
 // GetSpending returns session spending information.
+//
+// On the wallet rail both fields are exact: every paid call signs a known
+// amount, so TotalUSD is what was actually settled and Calls counts the paid
+// ones.
+//
+// On the account rail neither field can be that: the client is not told what a
+// call cost. Calls counts every request the gateway answered, free models
+// included, because nothing in the response distinguishes them. TotalUSD covers
+// only the endpoints that publish a settled `price` in their body — the image
+// and video families do; chat, /v1/messages, search and most data endpoints do
+// not, being billed post-hoc from usage at the account's contracted rate, which
+// the SDK does not hold and must not guess. Treat it as a floor, and
+// user.blockrun.ai as the authority on what an account has spent.
 func (bc *baseClient) GetSpending() Spending {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
@@ -303,6 +360,7 @@ func (bc *baseClient) doRequestHeaders(ctx context.Context, endpoint string, bod
 		return nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	bc.applyAuth(req)
 
 	resp, err := bc.httpClient.Do(req)
 	if err != nil {
@@ -312,6 +370,10 @@ func (bc *baseClient) doRequestHeaders(ctx context.Context, endpoint string, bod
 
 	// Handle 402 Payment Required
 	if resp.StatusCode == http.StatusPaymentRequired {
+		if bc.isAPIKey() {
+			refusal, _ := io.ReadAll(resp.Body)
+			return nil, nil, apiKeyPaymentError(refusal)
+		}
 		return bc.handlePaymentAndRetryHeaders(ctx, url, jsonBody, resp)
 	}
 
@@ -329,6 +391,8 @@ func (bc *baseClient) doRequestHeaders(ctx context.Context, endpoint string, bod
 	if err != nil {
 		return nil, nil, err
 	}
+
+	bc.recordAPIKeyCost(data, endpoint)
 
 	// Store in cache
 	if bc.cache != nil {
@@ -353,6 +417,7 @@ func (bc *baseClient) doGet(ctx context.Context, endpoint string) ([]byte, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+	bc.applyAuth(req)
 
 	resp, err := bc.httpClient.Do(req)
 	if err != nil {
@@ -419,6 +484,7 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+	bc.applyAuth(req)
 
 	resp, err := bc.httpClient.Do(req)
 	if err != nil {
@@ -427,6 +493,10 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusPaymentRequired {
+		if bc.isAPIKey() {
+			refusal, _ := io.ReadAll(resp.Body)
+			return nil, apiKeyPaymentError(refusal)
+		}
 		// Kept alongside the signPayment guard on purpose: bailing here skips
 		// parsing the 402 body, so a keyless client gets "no wallet is
 		// configured" rather than whatever parse error a malformed 402 would
@@ -457,6 +527,7 @@ func (bc *baseClient) doGetWithPayment(ctx context.Context, endpoint string, que
 	if err != nil {
 		return nil, err
 	}
+	bc.recordAPIKeyCost(data, endpoint)
 	if bc.cache != nil {
 		bc.cache.Set(endpoint, cacheBody, data)
 	}
@@ -732,6 +803,14 @@ func (bc *baseClient) recordSettledCost(amount, endpoint string) {
 func (bc *baseClient) resolvePollURL(u string) string {
 	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
 		return u
+	}
+	// Account rail: poll_url is minted by the x402 gateway and is relative to
+	// ITS host, so it arrives as "/api/v1/...". api.blockrun.ai serves the same
+	// route at "/v1/..." and answers "/api/v1/..." with a wrong_host error, so
+	// the prefix has to come off here — the alternative is every async job
+	// (video, slow images) polling a 404 forever.
+	if bc.isAPIKey() {
+		return bc.apiURL + strings.TrimPrefix(u, "/api")
 	}
 	base := bc.apiURL
 	if strings.HasSuffix(base, "/api") {

@@ -328,6 +328,7 @@ func (c *RPCClient) doRawRequestHeaders(ctx context.Context, endpoint string, bo
 		return nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.applyAuth(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -336,6 +337,10 @@ func (c *RPCClient) doRawRequestHeaders(ctx context.Context, endpoint string, bo
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusPaymentRequired {
+		if c.isAPIKey() {
+			refusal, _ := io.ReadAll(resp.Body)
+			return nil, nil, apiKeyPaymentError(refusal)
+		}
 		return c.handlePaymentAndRetryHeaders(ctx, url, jsonBody, resp)
 	}
 
