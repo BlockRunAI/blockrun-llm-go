@@ -58,6 +58,13 @@ type rpcError struct {
 // fed its bs58 pubkey into an eth_call against public Base RPCs — which either
 // errors or answers about an address that is not the caller's.
 func (c *LLMClient) GetBalance(ctx context.Context) (float64, error) {
+	// An API-key client has no address to read a chain balance for. Returning
+	// 0 would be the worst answer available: it is indistinguishable from an
+	// empty wallet, and an agent that gates on it would stop calling an account
+	// with plenty of credit.
+	if c.isAPIKey() {
+		return 0, walletOnly("GetBalance")
+	}
 	if c.isSolana() {
 		return getSolanaUSDCBalance(ctx, c.solanaRPCURL, c.address)
 	}
@@ -69,6 +76,9 @@ func (c *LLMClient) GetBalance(ctx context.Context) (float64, error) {
 // Base only: there is no configured Solana devnet USDC mint, so a Solana client
 // gets an explicit error rather than a reading from the wrong chain.
 func (c *LLMClient) GetBalanceTestnet(ctx context.Context) (float64, error) {
+	if c.isAPIKey() {
+		return 0, walletOnly("GetBalanceTestnet")
+	}
 	if c.isSolana() {
 		return 0, &ValidationError{
 			Field:   "chain",

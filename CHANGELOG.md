@@ -2,6 +2,75 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.21.0
+
+- **feat(apikey): the SDK accepts a BlockRun API key, not only a wallet.**
+  Every paid path in this SDK assumed x402: a 402 challenge, a locally signed
+  payment, a retry. That made a wallet the price of admission, which is a
+  non-starter for a team whose finance function cannot hold USDC and for any CI
+  runner that should not carry a signing key. A key from
+  [user.blockrun.ai](https://user.blockrun.ai) now works everywhere a wallet
+  key does. It is not a new client type and not a new constructor: the
+  credential parameter every `NewXClient` already takes now accepts a `brk_`
+  key, and `BLOCKRUN_API_KEY` is read when it is empty — so twelve constructors
+  and every skill that calls them gained the rail without a signature change.
+  Requests go to `api.blockrun.ai` as `Authorization: Bearer …`, draw prepaid
+  credit, and never sign anything. `PaymentMode()` reports which rail a client
+  ended up on.
+
+  Four things had to change beyond attaching a header, and each of them was a
+  silent failure rather than a compile error:
+
+  - `api.blockrun.ai` serves `/v1/...` at the root and answers `/api/v1/...`
+    with `wrong_host`, so the account rail needs its own base URL rather than
+    `DefaultAPIURL`'s `/api` suffix.
+  - `poll_url` is minted by the x402 gateway relative to *its* host, so it
+    arrives as `/api/v1/...`. Resolved unchanged it would have sent every async
+    job — video, slow images — polling a 404 until its budget ran out.
+  - On the account rail the async submit answers **202 on the first POST**.
+    Both poll loops assumed a 402 came first and treated anything else as an
+    error, so image and video were broken for API keys before they started.
+    The loop is now shared, with the x402 context passed in and nil on the
+    account rail.
+  - `SetupAgentWallet()` minted a keyfile unconditionally. With a key
+    configured there is nothing to sign with, so it now returns an API-key
+    client and writes nothing to disk — which is what lets an agent or a skill
+    call it on either rail.
+
+  Wallet users are unaffected. Precedence is: an explicit constructor argument,
+  then `BLOCKRUN_API_KEY`, then the wallet variables — so nothing changes until
+  that variable is set, and passing a wallet key explicitly always opts back
+  out. `BLOCKRUN_API_KEY_URL` is deliberately not `BLOCKRUN_API_URL`: that one
+  names an x402 gateway, and an API-key client following it would send the key
+  to a host configured for a different rail.
+
+- **feat(apikey): wallet-only helpers refuse instead of answering wrongly.**
+  `GetBalance`, `GetBalanceTestnet` and `Onramp` have no meaning without an
+  address. Returning `0` would have been the worst available answer — it is
+  indistinguishable from an empty wallet, and an agent gating on it would stop
+  calling a well-funded account. They return a `*ValidationError` naming the
+  helper and pointing at the dashboard; `GetWalletAddress()` returns `""`. A
+  402 on this rail is likewise a credit refusal, not a challenge, so it surfaces
+  as a `*PaymentError` quoting the gateway's own reason and the top-up page
+  rather than "no wallet is configured".
+
+- **docs: the README covers both rails, and puts Solana ahead of Base.**
+  It opened with "No API keys required" and described funding a wallet as the
+  only way in, which is no longer true. It now leads with the two rails, shows
+  the API-key path first in Quick Start, and adds an *API Keys & Accounts*
+  section covering signup, key minting, top-up (minimum $5; the 5.5% + $0.30
+  processing fee is charged once at purchase, never on a call), credential
+  precedence and what changes. Solana now leads every place the two chains are
+  named — it settles sub-second and the facilitator pays the fee, so it is the
+  better default for anyone choosing today; Base is unchanged and still what
+  the bare `NewLLMClient` uses. The environment table listed three variables
+  and omitted `SOLANA_WALLET_KEY` entirely; it now lists all nine.
+
+  `GetSpending()` is documented honestly for the new rail: the account gateway
+  does not tell the client what a call cost, so `TotalUSD` books only the
+  families that publish a settled `price` (images, video) and is a floor
+  elsewhere, with the dashboard named as the authority.
+
 ## 0.20.0
 
 - **fix(solana): `GetBalance` reads the chain the client actually pays from.**

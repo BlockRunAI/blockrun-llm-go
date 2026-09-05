@@ -1,6 +1,12 @@
 # BlockRun Go SDK
 
-> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request in USDC over the x402 protocol, on **Base or Solana**. No API keys required — your wallet signature is your authentication.
+> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request — no subscription, no seats, no minimum.
+>
+> **Two ways to pay, same SDK, same catalogue.** Sign up at
+> **[user.blockrun.ai](https://user.blockrun.ai)** for an API key and prepaid
+> credit (top up with a card), or hold USDC in your own wallet and let each
+> request settle itself over x402 — on **Solana or Base**. Pick whichever fits;
+> the constructor takes either credential and everything below works the same.
 >
 > The module keeps the name `blockrun-llm-go` because in Go the repository name *is* the import path, and renaming it would break every existing consumer. The SDK stopped being LLM-only long before v0.19.
 >
@@ -31,7 +37,10 @@ import (
 func main() {
     ctx := context.Background()
 
-    client, err := blockrun.NewLLMClient("")  // uses BASE_CHAIN_WALLET_KEY env var
+    // Reads BLOCKRUN_API_KEY (an API key from user.blockrun.ai) if set,
+    // otherwise BASE_CHAIN_WALLET_KEY and pays x402 on Base.
+    // For x402 on Solana use NewLLMClientSolana — see "Pay on Solana".
+    client, err := blockrun.NewLLMClient("")
     if err != nil {
         log.Fatal(err)
     }
@@ -44,9 +53,25 @@ func main() {
 }
 ```
 
-### Try It Free (No USDC Required)
+```bash
+# API key — sign up at https://user.blockrun.ai, then:
+export BLOCKRUN_API_KEY=brk_live_...
 
-Want to kick the tires before funding a wallet? Route to BlockRun's free NVIDIA tier:
+# …or a wallet, and every call pays itself in USDC:
+export SOLANA_WALLET_KEY=...        # with NewLLMClientSolana / NewXClientSolana
+export BASE_CHAIN_WALLET_KEY=0x...  # with NewLLMClient / NewXClient
+```
+
+The credential can also be passed directly — `NewLLMClient("brk_live_…")` or
+`NewLLMClient("0x…")`. Every constructor in the SDK takes it in that same first
+argument, and `client.PaymentMode()` reports which rail you ended up on.
+`BLOCKRUN_API_KEY` works with every constructor, the `…Solana` ones included.
+
+### Try It Free (No Balance Required)
+
+Want to kick the tires before topping up or funding a wallet? Route to BlockRun's
+free NVIDIA tier — it settles $0 on both rails, so an unfunded wallet or a $0
+credit account is enough:
 
 ```go
 // Option 1: call a free model directly
@@ -80,17 +105,68 @@ fmt.Println(result.Response) // "4"
 
 ## How Payment Works
 
-No API keys, no subscription, no invoices. You hold USDC in your own wallet — on
-**Base** (the default) or **Solana** — and **each request pays for itself** with
-an on-chain micropayment. Two phases: fund the wallet once, then every call
-settles automatically.
+There are two front doors onto the same gateway, the same catalogue and the same
+response shapes. You choose one with the credential you hand the constructor.
 
-### 1. Fund your wallet once
+| | **API key** — `api.blockrun.ai` | **Wallet (x402)** — `sol.blockrun.ai` / `blockrun.ai` |
+|---|---|---|
+| Authenticates with | `brk_live_…` key from [user.blockrun.ai](https://user.blockrun.ai) | a signature from your own wallet |
+| Pays from | prepaid credit on your account | USDC you hold, settled on-chain per call |
+| Set up by | signing in with Google, minting a key, topping up with a card | funding a wallet with USDC |
+| Chain | none — credit is off-chain | **Solana** or **Base** |
+| Custody | BlockRun holds the credit you bought | non-custodial; your key never leaves your machine |
+| Best for | teams that cannot run wallets, CI, anyone who wants a card receipt | agents, autonomous spend, no-signup access |
 
-A Base client (`NewLLMClient`, key via `BASE_CHAIN_WALLET_KEY`) needs **USDC on
-Base**. A Solana client (`NewLLMClientSolana`, key via `SOLANA_WALLET_KEY`) needs
-**USDC on Solana** instead. Three ways to get it there:
+Free models are free on both. You can call them with nothing but a key and $0 of
+credit, or with a wallet holding $0 of USDC.
 
+### Option A — API key (user.blockrun.ai)
+
+1. **Sign in** at **[user.blockrun.ai](https://user.blockrun.ai)** with Google.
+2. **Mint a key** on the *Keys* page. It is shown once — copy it then.
+3. **Top up** on the *Credits* page with a card. Minimum $5. The processing fee
+   (5.5% + $0.30) is charged **once, at purchase** — never on a call — so $10.85
+   buys $10.00 of credit and every model then bills at the published list price,
+   with no per-call minimum and no per-call fee.
+4. **Export it** and you are done:
+
+```bash
+export BLOCKRUN_API_KEY=brk_live_...
+```
+
+```go
+client, _ := blockrun.NewLLMClient("")             // picks up BLOCKRUN_API_KEY
+fmt.Println(client.PaymentMode())                  // "apikey"
+
+reply, _ := client.Chat(ctx, "openai/gpt-4o", "What is 2+2?")
+```
+
+Requests go to `https://api.blockrun.ai/v1` with the key as
+`Authorization: Bearer …`. There is no 402 round trip and nothing is signed —
+the gateway meters the call at exact usage and draws it from your credit.
+Spending, per-call activity and remaining balance are on the dashboard at
+[user.blockrun.ai/dashboard](https://user.blockrun.ai/dashboard).
+
+Out of credit, you get a `*PaymentError` naming the account — not a wallet
+error — and pointing at the top-up page. Free models keep working.
+
+### Option B — wallet + x402
+
+You hold USDC in your own wallet — on **Solana** or **Base** — and **each
+request pays for itself** with an on-chain micropayment. No signup, no account,
+nothing custodial.
+
+#### 1. Fund your wallet once
+
+A Solana client (`NewLLMClientSolana`, key via `SOLANA_WALLET_KEY`) needs **USDC
+on Solana**. A Base client (`NewLLMClient`, key via `BASE_CHAIN_WALLET_KEY`)
+needs **USDC on Base** instead. Three ways to get it there:
+
+- **Transfer USDC** you already hold to your wallet address
+  (`client.GetWalletAddress()`) — on the same chain your client pays from.
+  Solana USDC (mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`) for a Solana
+  client; Base USDC for a Base client. Sending Base USDC to a Solana client's
+  wallet does not work.
 - **Buy with a card** — mint a Coinbase Onramp link and pay with card/bank
   (60+ fiat currencies). This is **free** (you're only funding your own wallet).
   **Base only** — `Onramp` rejects anything that isn't an EVM address:
@@ -100,36 +176,41 @@ Base**. A Solana client (`NewLLMClientSolana`, key via `SOLANA_WALLET_KEY`) need
   fmt.Println("Buy USDC:", res.URL) // open https://pay.coinbase.com/... and pay
   ```
 
-- **Transfer USDC** you already hold to your wallet address (`client.GetWalletAddress()`) — on the same chain your client pays from. Base USDC for a Base client; Solana USDC (mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`) for a Solana client. Sending Base USDC to a Solana client's wallet does not work.
-- **Skip funding entirely** — call the [free NVIDIA models](#try-it-free-no-usdc-required); they cost $0 and need no balance.
+- **Skip funding entirely** — call the [free NVIDIA models](#try-it-free-no-balance-required); they cost $0 and need no balance.
 
 $5 of USDC covers thousands of paid-model requests. `client.GetBalance(ctx)`
-reports it on whichever chain the client pays from — the Base USDC contract for
-a Base client, the USDC SPL mint for a Solana one.
+reports it on whichever chain the client pays from — the USDC SPL mint for a
+Solana client, the Base USDC contract for a Base one.
 
-### 2. Every request pays itself (automatic x402)
+#### 2. Every request pays itself (automatic x402)
 
 You never call a "pay" function for inference — the SDK does it inline on each request:
 
 1. You call e.g. `client.Chat(ctx, model, prompt)`.
 2. The gateway replies **`402 Payment Required`** with the exact price for that call.
-3. The SDK signs the payment **locally** — EIP-712 typed data on Base, or an ed25519-signed `TransferChecked` transaction on Solana, which BlockRun's facilitator co-signs as fee payer so the transfer costs you no SOL.
+3. The SDK signs the payment **locally** — an ed25519-signed `TransferChecked` transaction on Solana, which BlockRun's facilitator co-signs as fee payer so the transfer costs you no SOL, or EIP-712 typed data on Base.
 4. It retries the request with the signed payment proof attached.
 5. The gateway settles the payment on-chain and returns your response.
 
 All of this happens in one method call — you just get the response back (or a
 `*PaymentError` if the wallet is underfunded).
 
-### What it costs & how to verify
-
-- **Per call, pay-as-you-go.** Price is set per endpoint/model (see [Available Models](#available-models)); free NVIDIA models settle $0.
-- **Track it.** `client.GetSpending()` returns this session's total USD + call count; a JSONL cost log persists across runs (see [Cost Tracking](#cost-tracking)).
-- **Verify on-chain.** Settlements are real USDC transfers — auditable on [Basescan](https://basescan.org) for Base, [Solscan](https://solscan.io) for Solana.
-
 **Your private key never leaves your machine** — it only signs payments locally;
 only the signature is transmitted. BlockRun is non-custodial and never holds your funds.
 
+### What it costs & how to verify
+
+- **Per call, pay-as-you-go.** Price is set per endpoint/model (see [Available Models](#available-models)); free NVIDIA models settle $0.
+- **Track it.** `client.GetSpending()` returns this session's total USD + call count; a JSONL cost log persists across runs (see [Cost Tracking](#cost-tracking)). On the API-key rail the dashboard is the authority — see the caveat in that section.
+- **Verify.** Wallet settlements are real USDC transfers, auditable on [Solscan](https://solscan.io) for Solana and [Basescan](https://basescan.org) for Base. API-key calls are itemised on [user.blockrun.ai/dashboard](https://user.blockrun.ai/dashboard).
+
 ## Pay on Solana
+
+**Solana is the recommended chain for x402 payments**: settlement is sub-second
+and BlockRun's facilitator co-signs as fee payer, so a transfer costs you no SOL
+and you need to hold nothing but USDC. Base works identically and remains what
+the bare `NewLLMClient` constructor uses, so nothing existing changes — but if
+you are choosing today, choose Solana.
 
 Every client has a `NewXClientSolana` counterpart that pays **USDC on
 Solana** via `sol.blockrun.ai` instead of Base — same API, same verbatim responses:
@@ -181,10 +262,90 @@ transfer. `GetBalanceTestnet` also stays Base Sepolia and returns an explicit
 error on a Solana client, since no devnet USDC mint is configured; `GetBalance`
 itself works on both chains.
 
+## API Keys & Accounts (user.blockrun.ai)
+
+An API key from **[user.blockrun.ai](https://user.blockrun.ai)** replaces the
+wallet entirely: no chain, no signing, no on-chain settlement. It is the same
+catalogue and the same SDK — chat, streaming, images, video, speech, music,
+search, Exa, RPC, DeFi, DEX, Surf, prediction markets, phone, voice, the
+Anthropic Messages client, all of it.
+
+### Getting one
+
+| Step | Where |
+|---|---|
+| Sign in with Google | [user.blockrun.ai](https://user.blockrun.ai) |
+| Mint a key (`brk_live_…`, shown once) | [/dashboard/keys](https://user.blockrun.ai/dashboard/keys) |
+| Top up with a card — min $5, fee 5.5% + $0.30 charged once at purchase | [/dashboard/credits](https://user.blockrun.ai/dashboard/credits) |
+| See every call, its price and your balance | [/dashboard/activity](https://user.blockrun.ai/dashboard/activity) |
+
+A brand-new account starts at $0 of credit and can still call the
+[free models](#try-it-free-no-balance-required) — registration, not a card, is the
+price of admission to those.
+
+### Using it
+
+Any constructor. The credential argument accepts either kind, and a `brk_`
+prefix is what selects this rail:
+
+```go
+client, _ := blockrun.NewLLMClient("brk_live_...")
+img, _    := blockrun.NewImageClient("")            // or from BLOCKRUN_API_KEY
+ac, _     := blockrun.NewAnthropicClient("")        // Anthropic Messages, same key
+
+// Even the Solana constructors take it — a key answers the chain question
+// rather than being answered by it.
+sol, _ := blockrun.NewLLMClientSolana("brk_live_...", "")
+```
+
+Precedence, since it decides whether a call spends credit or on-chain USDC:
+
+1. an explicit argument — `NewLLMClient("brk_live_…")` or `NewLLMClient("0x…")`;
+2. `BLOCKRUN_API_KEY`, which **beats** `BLOCKRUN_WALLET_KEY` /
+   `BASE_CHAIN_WALLET_KEY` / `SOLANA_WALLET_KEY`;
+3. the wallet variables.
+
+So an existing wallet setup is untouched until you set `BLOCKRUN_API_KEY`, and
+passing a wallet key explicitly always opts back out. Check which one you got:
+
+```go
+if client.PaymentMode() == blockrun.PaymentModeAPIKey {
+    // requests go to api.blockrun.ai and draw prepaid credit
+}
+```
+
+`SetupAgentWallet()` follows the same rule and mints **no** wallet file when a
+key is configured — so an agent or skill can call it unconditionally and work on
+either rail.
+
+### What changes
+
+- **Wallet-only helpers refuse rather than mislead.** `GetBalance`,
+  `GetBalanceTestnet` and `Onramp` return a `*ValidationError` pointing at the
+  dashboard. Returning `0` would be indistinguishable from an empty wallet, and
+  an agent gating on it would stop calling a well-funded account.
+  `GetWalletAddress()` returns `""`.
+- **Out of credit is a `*PaymentError`**, not a 402 to sign, and its message
+  names the top-up page and quotes the gateway's own reason.
+- **`GetSpending()` is a floor, not a total** — see [Cost Tracking](#cost-tracking).
+- **Nothing else.** Every method, option and response type is identical.
+
+### Environment
+
+```bash
+export BLOCKRUN_API_KEY=brk_live_...
+export BLOCKRUN_API_KEY_URL=https://api.blockrun.ai   # optional override
+```
+
+`BLOCKRUN_API_KEY_URL` is deliberately not `BLOCKRUN_API_URL`: that one names an
+x402 gateway, and an API-key client must never follow it and send your key to a
+host you configured for a different rail.
+
 ## Features
 
 | Feature | Description |
 |---------|-------------|
+| **Two payment rails** | API key + prepaid credit (`user.blockrun.ai`), or x402 USDC from your own wallet on Solana / Base |
 | **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> models |
 | **Anthropic Client** | Native Anthropic Messages API with automatic x402 payments |
 | **Smart Routing** | Auto-selects the best model for your prompt |
@@ -204,18 +365,19 @@ itself works on both chains.
 | **Surf (asksurf.ai)** | ~83 endpoints: exchange data, on-chain SQL, prediction markets, wallet/social analytics |
 | **Response Caching** | Local cache with per-endpoint TTL |
 | **Cost Tracking** | Session spending + persistent JSONL log |
-| **Balance Checking** | Query USDC balance via Base chain RPC |
+| **Balance Checking** | Query USDC balance on Solana or Base (wallet rail; credit balance is on the dashboard) |
 | **Fund Wallet** | One-time Coinbase Onramp link — buy USDC with a card (Base only) |
-| **Agent Wallet Setup** | Auto-create wallets for autonomous agents |
+| **Agent Wallet Setup** | Auto-create wallets for autonomous agents — a no-op when an API key is configured |
 
 ## Anthropic Client
 
-Use the native Anthropic Messages API format with BlockRun's x402 payment gateway.
+Use the native Anthropic Messages API format with BlockRun's gateway — with an
+API key or with x402 from a wallet, same as everything else.
 Works with Claude models and any other BlockRun model (OpenAI, Google, etc.) via Anthropic message format.
 Pass any model ID — e.g. `claude-fable-5` (Mythos-class, above Opus), `claude-opus-4-8`, or `claude-sonnet-4-6`.
 
 ```go
-client, err := blockrun.NewAnthropicClient("")  // uses BLOCKRUN_WALLET_KEY env var
+client, err := blockrun.NewAnthropicClient("")  // BLOCKRUN_API_KEY, else a wallet key
 if err != nil {
     log.Fatal(err)
 }
@@ -463,8 +625,8 @@ ie, lu, cn, ca`.
 `RPCClient` wraps `POST /v1/rpc/{network}` — standard JSON-RPC 2.0 access to
 <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains through one endpoint (Ethereum, Base, Solana, Polygon, BSC,
 Arbitrum, Optimism, Avalanche, Bitcoin, Sui, and more; powered by Tatum's RPC
-gateway). No API key, no per-chain endpoints: flat **$0.002 per call** in
-USDC; a JSON-RPC batch charges per element.
+gateway). No per-chain endpoints and no per-chain provider account: flat
+**$0.002 per call**, from credit or USDC; a JSON-RPC batch charges per element.
 
 ```go
 rpcClient, err := blockrun.NewRPCClient("")
@@ -899,15 +1061,36 @@ for endpoint, cost := range summary.ByEndpoint {
 }
 ```
 
+**On the wallet rail both numbers are exact** — every paid call signs a known
+amount, so `TotalUSD` is what actually settled and `Calls` counts the paid ones.
+
+**On the API-key rail they cannot be.** The client is never told what a call
+cost: chat, `/v1/messages`, search and most data endpoints are billed post-hoc
+from usage at your account's contracted rate, which the SDK does not hold and
+will not guess — two implementations of one price sheet drift, and a drifted
+number is worse than a blank one. So `Calls` counts every request the gateway
+answered (free models included, since nothing in the response distinguishes
+them) and `TotalUSD` books only the families that publish a settled `price` in
+their body — images and video. Treat it as a floor;
+[user.blockrun.ai/dashboard](https://user.blockrun.ai/dashboard) is the
+authority on what an account has spent.
+
 ## Balance Checking
+
+Wallet rail only — it reads USDC on whichever chain the client pays from
+(the SPL mint for a Solana client, the Base USDC contract for a Base one):
 
 ```go
 balance, err := client.GetBalance(ctx)
 fmt.Printf("USDC balance: $%.2f\n", balance)
 
-// Testnet
+// Testnet (Base Sepolia)
 balance, err := client.GetBalanceTestnet(ctx)
 ```
+
+An API-key client has no address, so both return a `*ValidationError` rather
+than a `0` that reads as an empty wallet. Credit balance lives on
+[user.blockrun.ai/dashboard](https://user.blockrun.ai/dashboard).
 
 ## Fund Wallet (Coinbase Onramp)
 
@@ -927,7 +1110,9 @@ fmt.Println("Buy USDC:", res.URL) // https://pay.coinbase.com/...
 
 ## Agent Wallet Setup
 
-For autonomous agents that need their own wallet:
+For autonomous agents that need their own wallet. With `BLOCKRUN_API_KEY` set it
+mints nothing and hands back an API-key client instead, so the same call works on
+either rail:
 
 ```go
 // Auto-creates wallet if none exists, prints funding instructions
@@ -963,11 +1148,20 @@ Use `client.ListModels(ctx)` for the full list with current pricing.
 
 ## Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `BASE_CHAIN_WALLET_KEY` | Base chain wallet private key | Yes (or pass to constructor) |
-| `BLOCKRUN_WALLET_KEY` | Alias for BASE_CHAIN_WALLET_KEY | No |
-| `BLOCKRUN_API_URL` | Custom API endpoint | No (default: https://blockrun.ai/api) |
+One credential is required — an API key **or** a wallet key. Everything else is
+optional.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `BLOCKRUN_API_KEY` | API key from [user.blockrun.ai](https://user.blockrun.ai) (`brk_live_…`). **Takes precedence over every wallet variable.** | — |
+| `SOLANA_WALLET_KEY` | bs58 Solana wallet key, for `NewXClientSolana` | falls back to `~/.*/solana-wallet.json`, then `~/.blockrun/.solana-session` |
+| `BASE_CHAIN_WALLET_KEY` | Base chain wallet private key | — |
+| `BLOCKRUN_WALLET_KEY` | Alias for `BASE_CHAIN_WALLET_KEY` | — |
+| `BLOCKRUN_API_KEY_URL` | Override the API-key gateway | `https://api.blockrun.ai` |
+| `BLOCKRUN_SOLANA_API_URL` | Override the Solana x402 gateway | `https://sol.blockrun.ai/api` |
+| `BLOCKRUN_API_URL` | Override the Base x402 gateway | `https://blockrun.ai/api` |
+| `SOLANA_RPC_URL` | RPC for blockhash + mint info while signing | BlockRun's free proxy |
+| `BLOCKRUN_CHAT_TIMEOUT` | Chat HTTP timeout, in seconds | `600` |
 
 ## Error Handling
 
@@ -978,6 +1172,8 @@ if err != nil {
     case *blockrun.ValidationError:
         fmt.Printf("Invalid input: %s - %s\n", e.Field, e.Message)
     case *blockrun.PaymentError:
+        // Wallet rail: underfunded. API-key rail: out of credit —
+        // the message names the top-up page.
         fmt.Printf("Payment failed: %s\n", e.Message)
     case *blockrun.APIError:
         fmt.Printf("API error %d: %s\n", e.StatusCode, e.Message)
@@ -987,34 +1183,59 @@ if err != nil {
 
 ## Security
 
-- **Private key stays local**: Only used for local signing — EIP-712 on Base, ed25519 on Solana — never transmitted
+**Wallet rail**
+
+- **Private key stays local**: Only used for local signing — ed25519 on Solana, EIP-712 on Base — never transmitted
 - **Non-custodial**: BlockRun never holds your funds
-- **On-chain verifiable**: All payments visible on [Basescan](https://basescan.org) (Base) or [Solscan](https://solscan.io) (Solana)
-- Use environment variables, never hard-code keys
+- **On-chain verifiable**: All payments visible on [Solscan](https://solscan.io) (Solana) or [Basescan](https://basescan.org) (Base)
 - Use dedicated wallets with small balances for API payments
+
+**API-key rail**
+
+- An API key **is** transmitted on every request — it authenticates you, so treat it like any bearer token: keep it out of source control, out of client-side code and out of logs
+- Rotate or revoke on [/dashboard/keys](https://user.blockrun.ai/dashboard/keys); mint separate keys for prod and staging so the activity log can tell them apart
+- The `BLOCKRUN_API_KEY_URL` override exists so a key is never sent to a host configured for the x402 rail
+- Credit is prepaid, so a leaked key is capped by the balance on the account, not by a card
+
+**Both**
+
+- Use environment variables, never hard-code credentials
 
 ## Requirements
 
 - Go 1.22+
-- A wallet with USDC on Base — or a Solana wallet with USDC, see [Pay on Solana](#pay-on-solana)
+- One credential, either:
+  - an API key from [user.blockrun.ai](https://user.blockrun.ai) — see [API Keys & Accounts](#api-keys--accounts-userblockrunai); or
+  - a wallet with USDC on Solana (see [Pay on Solana](#pay-on-solana)) or on Base
+- **No funds** are needed for the [free models](#try-it-free-no-balance-required) — they settle $0 on either rail. The SDK still wants a credential to build a client with: an unfunded wallet, or a key on a $0 account, both work
 
 ## FAQ
 
 **What is blockrun-llm-go?**
-The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Uses x402 micropayments — no API keys, no subscriptions. The `-llm-` in the name is history, not scope.
+The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->71<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Pay with an API key and prepaid credit, or with x402 micropayments from your own wallet. No subscriptions either way. The `-llm-` in the name is history, not scope.
 
-**How much does it cost?**
-Pay only for what you use. <!-- br:models.free -->5<!-- /br:models.free --> NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 USDC gets you thousands of paid-model requests.
+**Do I need a crypto wallet?**
+No. Sign up at [user.blockrun.ai](https://user.blockrun.ai), mint an API key, top up with a card, and `export BLOCKRUN_API_KEY=brk_live_…`. See [API Keys & Accounts](#api-keys--accounts-userblockrunai). A wallet is the other option, not a requirement.
+
+**Where do I get an API key, and how do I add credit?**
+Both on [user.blockrun.ai](https://user.blockrun.ai) — sign in with Google, mint a key on [/dashboard/keys](https://user.blockrun.ai/dashboard/keys) (shown once), top up on [/dashboard/credits](https://user.blockrun.ai/dashboard/credits). Minimum $5. The 5.5% + $0.30 processing fee is charged once at purchase, never on a call.
+
+**I already use a wallet. Does adding API-key support break anything?**
+No. Nothing changes unless you set `BLOCKRUN_API_KEY` — and passing a wallet key to a constructor explicitly always opts back out. `client.PaymentMode()` tells you which rail you are on.
 
 **Does it support Solana?**
-Yes. Every client has a `NewXClientSolana` counterpart that pays USDC on Solana via `sol.blockrun.ai` — same API, same responses. See [Pay on Solana](#pay-on-solana). Base remains the default.
+Yes, and Solana is the recommended chain: settlement is sub-second and BlockRun's facilitator pays the fee, so you hold no SOL. Every client has a `NewXClientSolana` counterpart — same API, same responses. See [Pay on Solana](#pay-on-solana). Base works identically and is still what the bare `NewLLMClient` constructor uses.
+
+**How much does it cost?**
+Pay only for what you use. <!-- br:models.free -->5<!-- /br:models.free --> NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 of credit or USDC gets you thousands of paid-model requests.
 
 **Is streaming supported?**
-Yes. Use `ChatCompletionStream` for SSE streaming.
+Yes. Use `ChatCompletionStream` for SSE streaming — on both rails.
 
 ## Links
 
 - [Website](https://blockrun.ai)
+- [Sign up / dashboard / API keys](https://user.blockrun.ai)
 - [Documentation](https://github.com/BlockRunAI/awesome-blockrun/tree/main/docs)
 - [Python SDK](https://github.com/blockrunai/blockrun-llm)
 - [TypeScript SDK](https://github.com/blockrunai/blockrun-llm-ts)

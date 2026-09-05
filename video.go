@@ -353,12 +353,29 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req1.Header.Set("Content-Type", "application/json")
+	c.applyAuth(req1)
 	resp1, err := c.httpClient.Do(req1)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	body1, _ := io.ReadAll(resp1.Body)
 	resp1.Body.Close()
+
+	// Account rail: the API key IS the payment, so the submit answers with the
+	// async envelope directly and there is no 402 to answer. A 402 here means
+	// the account is out of credit.
+	if c.isAPIKey() {
+		if resp1.StatusCode == http.StatusPaymentRequired {
+			return nil, apiKeyPaymentError(body1)
+		}
+		if resp1.StatusCode != http.StatusOK && resp1.StatusCode != http.StatusAccepted {
+			return nil, &APIError{
+				StatusCode: resp1.StatusCode,
+				Message:    fmt.Sprintf("Submit failed: %s", string(body1)),
+			}
+		}
+		return c.pollVideoJob(ctx, submitPath, body1, resp1.StatusCode, nil)
+	}
 
 	if resp1.StatusCode != http.StatusPaymentRequired {
 		return nil, &APIError{
@@ -418,18 +435,49 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 		}
 	}
 
+	return c.pollVideoJob(ctx, submitPath, body2, resp2.StatusCode, &videoPayment{
+		option:      paymentOption,
+		payload:     paymentPayload,
+		resourceURL: resourceURL,
+		description: paymentReq.Resource.Description,
+		extensions:  paymentReq.Extensions,
+	})
+}
+
+// videoPayment carries the x402 context a poll loop needs to keep re-proving
+// payment. It is nil on the account rail, where the API key does that job.
+type videoPayment struct {
+	option      *PaymentOption
+	payload     string
+	resourceURL string
+	description string
+	extensions  map[string]any
+}
+
+// pollVideoJob GET-polls an async video job to a terminal state.
+//
+// Shared by both rails: the loop is identical apart from how each poll
+// authenticates — a PAYMENT-SIGNATURE the wallet keeps fresh, or the API key —
+// and where the charge is read from. `pay` is nil on the account rail.
+func (c *VideoClient) pollVideoJob(
+	ctx context.Context,
+	submitPath string,
+	submitBody []byte,
+	submitStatus int,
+	pay *videoPayment,
+) (*VideoResponse, error) {
 	var submitData struct {
 		ID      string `json:"id"`
 		PollURL string `json:"poll_url"`
 		Status  string `json:"status"`
 	}
-	if err := json.Unmarshal(body2, &submitData); err != nil {
+	if err := json.Unmarshal(submitBody, &submitData); err != nil {
 		return nil, fmt.Errorf("failed to decode submit response: %w", err)
 	}
 	if submitData.ID == "" || submitData.PollURL == "" {
 		return nil, &APIError{
-			StatusCode: resp2.StatusCode,
-			Message:    fmt.Sprintf("submit response missing id/poll_url: %s", string(body2)),
+			StatusCode: submitStatus,
+			Message:    fmt.Sprintf("submit response missing id/poll_url: %s", string(submitBody)),
 		}
 	}
 
@@ -442,7 +490,10 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 	if lastStatus == "" {
 		lastStatus = "queued"
 	}
-	pollSig := paymentPayload
+	var pollSig string
+	if pay != nil {
+		pollSig = pay.payload
+	}
 	lastSigned := time.Now()
 
 	for time.Now().Before(deadline) {
@@ -456,14 +507,21 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 		if err != nil {
 			return nil, fmt.Errorf("failed to create poll request: %w", err)
 		}
-		pollSig, lastSigned = c.pollPaymentPayload(pollSig, lastSigned, paymentOption, resourceURL, paymentReq.Resource.Description, paymentReq.Extensions)
-		pollReq.Header.Set("PAYMENT-SIGNATURE", pollSig)
+		if pay != nil {
+			pollSig, lastSigned = c.pollPaymentPayload(pollSig, lastSigned, pay.option, pay.resourceURL, pay.description, pay.extensions)
+			pollReq.Header.Set("PAYMENT-SIGNATURE", pollSig)
+		}
+		c.applyAuth(pollReq)
 		pollResp, err := c.httpClient.Do(pollReq)
 		if err != nil {
 			return nil, fmt.Errorf("poll request failed: %w", err)
 		}
 		pollBytes, _ := io.ReadAll(pollResp.Body)
 		pollResp.Body.Close()
+
+		if pollResp.StatusCode == http.StatusPaymentRequired && pay == nil {
+			return nil, apiKeyPaymentError(pollBytes)
+		}
 
 		var pollData map[string]any
 		_ = json.Unmarshal(pollBytes, &pollData)
@@ -487,7 +545,11 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 		// caller was already charged. Record the cost as soon as completion is
 		// observed (the charge is irreversible at that point), then decode.
 		if lastStatus == "completed" {
-			c.recordVideoCost(paymentOption.Amount, submitPath)
+			if pay != nil {
+				c.recordVideoCost(pay.option.Amount, submitPath)
+			} else {
+				c.recordAPIKeyCost(pollBytes, submitPath)
+			}
 			var videoResp VideoResponse
 			if err := json.Unmarshal(pollBytes, &videoResp); err != nil {
 				return nil, fmt.Errorf("failed to decode response: %w", err)
@@ -509,11 +571,19 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 		}
 	}
 
+	// "No payment was taken" is true only on the wallet rail, where the gateway
+	// settles on the first completed poll and giving up therefore costs
+	// nothing. The account rail charges credit at submit, so promising the
+	// opposite there would be a refund the customer never gets.
+	unpaid := " No payment was taken."
+	if pay == nil {
+		unpaid = ""
+	}
 	return nil, &APIError{
 		StatusCode: http.StatusGatewayTimeout,
 		Message: fmt.Sprintf(
-			"Video generation did not complete within %.0fs (last status: %s). No payment was taken.",
-			videoPollBudget.Seconds(), lastStatus,
+			"Video generation did not complete within %.0fs (last status: %s).%s",
+			videoPollBudget.Seconds(), lastStatus, unpaid,
 		),
 	}
 }
