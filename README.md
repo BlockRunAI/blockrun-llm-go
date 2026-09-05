@@ -330,6 +330,20 @@ either rail.
 - **`GetSpending()` is a floor, not a total** — see [Cost Tracking](#cost-tracking).
 - **Nothing else.** Every method, option and response type is identical.
 
+### Switching between the rails
+
+An explicit wallet credential chooses the wallet rail even when
+`BLOCKRUN_API_KEY` is set, so `NewLLMClient("0x…")` always pays on-chain. A
+**blank** `BLOCKRUN_API_KEY` counts as unset — that is what `docker -e
+BLOCKRUN_API_KEY`, an unpopulated `${{ secrets.X }}`, and a bare
+`BLOCKRUN_API_KEY=` line all produce, and none of them mean you wanted the
+account rail. A **non-blank** value that is not a key is an error rather than a
+silent fall back to a wallet: someone typed a credential and got it wrong, and
+spending USDC instead of credit is the wrong way to tell them.
+
+Credentials are read once, at construction. Build a new client to change rails;
+an existing one keeps the account it started with.
+
 ### Environment
 
 ```bash
