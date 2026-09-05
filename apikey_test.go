@@ -47,14 +47,14 @@ func TestIsAPIKey(t *testing.T) {
 func TestResolveAPIKeyPrecedence(t *testing.T) {
 	t.Run("explicit key wins over everything", func(t *testing.T) {
 		t.Setenv(EnvAPIKey, "brk_live_fromenv")
-		if got := resolveAPIKey(testAPIKey); got != testAPIKey {
+		if got, err := resolveAPIKey(testAPIKey); err != nil || got != testAPIKey {
 			t.Errorf("got %q, want the explicit key", got)
 		}
 	})
 
 	t.Run("explicit wallet key opts out of the env key", func(t *testing.T) {
 		t.Setenv(EnvAPIKey, testAPIKey)
-		if got := resolveAPIKey(testPrivateKey); got != "" {
+		if got, err := resolveAPIKey(testPrivateKey); err != nil || got != "" {
 			t.Errorf("got %q, want no API key: an explicit wallet key chooses the x402 rail", got)
 		}
 	})
@@ -62,20 +62,20 @@ func TestResolveAPIKeyPrecedence(t *testing.T) {
 	t.Run("env key beats the wallet env vars", func(t *testing.T) {
 		t.Setenv(EnvAPIKey, testAPIKey)
 		t.Setenv("BLOCKRUN_WALLET_KEY", testPrivateKey)
-		if got := resolveAPIKey(""); got != testAPIKey {
+		if got, err := resolveAPIKey(""); err != nil || got != testAPIKey {
 			t.Errorf("got %q, want the env API key", got)
 		}
 	})
 
 	t.Run("no key anywhere", func(t *testing.T) {
-		if got := resolveAPIKey(""); got != "" {
+		if got, err := resolveAPIKey(""); err != nil || got != "" {
 			t.Errorf("got %q, want empty", got)
 		}
 	})
 
 	t.Run("a non-brk env value is not a key", func(t *testing.T) {
 		t.Setenv(EnvAPIKey, "not-a-key")
-		if got := resolveAPIKey(""); got != "" {
+		if got, err := resolveAPIKey(""); err == nil || got != "" {
 			t.Errorf("got %q, want empty", got)
 		}
 	})
@@ -269,9 +269,9 @@ func TestResolvePollURLStripsAPIPrefixOnAccountRail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLLMClient: %v", err)
 	}
-	got := apiKeyClient.resolvePollURL("/api/v1/images/generations/job_1")
+	got, err := apiKeyClient.resolvePollURL("/api/v1/images/generations/job_1")
 	want := DefaultAPIKeyURL + "/v1/images/generations/job_1"
-	if got != want {
+	if err != nil || got != want {
 		t.Errorf("account rail: got %q, want %q", got, want)
 	}
 
@@ -279,14 +279,14 @@ func TestResolvePollURLStripsAPIPrefixOnAccountRail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLLMClient: %v", err)
 	}
-	got = walletClient.resolvePollURL("/api/v1/images/generations/job_1")
+	got, err = walletClient.resolvePollURL("/api/v1/images/generations/job_1")
 	want = "https://blockrun.ai/api/v1/images/generations/job_1"
-	if got != want {
+	if err != nil || got != want {
 		t.Errorf("wallet rail: got %q, want %q", got, want)
 	}
 
-	if got := apiKeyClient.resolvePollURL("https://elsewhere.example/x"); got != "https://elsewhere.example/x" {
-		t.Errorf("absolute poll_url was rewritten: %q", got)
+	if _, err := apiKeyClient.resolvePollURL("https://elsewhere.example/x"); err == nil {
+		t.Error("foreign polling origin was accepted")
 	}
 }
 
@@ -454,5 +454,101 @@ func TestAPIKeyPaidGETCarriesTheKey(t *testing.T) {
 	}
 	if spend := client.GetSpending(); spend.TotalUSD != 0.001 {
 		t.Errorf("TotalUSD = %v, want 0.001", spend.TotalUSD)
+	}
+}
+
+func TestInvalidAPIKeyEnvDoesNotSelectWallet(t *testing.T) {
+	for _, value := range []string{"", "   ", "not-a-key"} {
+		t.Run("invalid="+value, func(t *testing.T) {
+			t.Setenv(EnvAPIKey, value)
+			t.Setenv("BLOCKRUN_WALLET_KEY", testPrivateKey)
+			if _, err := NewLLMClient(""); err == nil {
+				t.Fatal("expected invalid configured API key error")
+			}
+			client, err := NewLLMClient(testPrivateKey)
+			if err != nil || client.PaymentMode() != PaymentModeWallet {
+				t.Fatal("explicit wallet must still work")
+			}
+		})
+	}
+}
+
+func TestAPIKeyRotationDoesNotChangeExistingClient(t *testing.T) {
+	t.Setenv(EnvAPIKey, testAPIKey)
+	first, err := NewLLMClient("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvAPIKey, "brk_test_second")
+	second, err := NewLLMClient("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.apiKey != testAPIKey || second.apiKey != "brk_test_second" {
+		t.Fatal("client credentials crossed")
+	}
+}
+
+func TestForeignPollURLCannotReceiveAccountCredential(t *testing.T) {
+	// Use the public image API and a second server that must receive no key.
+	seen := 0
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { seen++; w.WriteHeader(500) }))
+	defer foreign.Close()
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(202)
+		json.NewEncoder(w).Encode(map[string]string{"id": "test", "poll_url": foreign.URL + "/job"})
+	}))
+	defer gateway.Close()
+	client, err := NewImageClient(testAPIKey, WithImageAPIURL(gateway.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Generate(context.Background(), "test", &ImageGenerateOptions{Model: "openai/gpt-image-1"})
+	if err == nil || !strings.Contains(err.Error(), "origin") {
+		t.Fatalf("expected origin error, got %v", err)
+	}
+	if seen != 0 {
+		t.Fatal("account credential reached foreign poll server")
+	}
+}
+
+func TestAccountAndWalletCanShareHTTPClientWithoutSharingAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/account/v1/chat/completions":
+			if r.Header.Get("Authorization") != "Bearer "+testAPIKey || r.Header.Get("Payment-Signature") != "" {
+				t.Error("account authentication changed or included a wallet proof")
+			}
+		case "/wallet/v1/chat/completions":
+			if r.Header.Get("Authorization") != "" {
+				t.Error("account key crossed into wallet request")
+			}
+		default:
+			t.Errorf("unexpected endpoint: %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer server.Close()
+	shared := server.Client()
+	originalTransport := shared.Transport
+	t.Setenv("BLOCKRUN_API_KEY", testAPIKey)
+	account, err := NewLLMClient("", WithAPIURL(server.URL+"/account"), WithHTTPClient(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet, err := NewLLMClient(testPrivateKey, WithAPIURL(server.URL+"/wallet"), WithHTTPClient(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BLOCKRUN_API_KEY", "brk_live_changed_account")
+	t.Setenv("BLOCKRUN_API_KEY_URL", "https://changed.example")
+	for _, client := range []*LLMClient{account, wallet, account} {
+		if reply, err := client.Chat(context.Background(), "openai/gpt-5.2", "hi"); err != nil || reply != "ok" {
+			t.Fatalf("call failed: %q %v", reply, err)
+		}
+	}
+	if shared.Transport != originalTransport || wallet.GetWalletAddress() != testWalletAddress {
+		t.Fatal("account setup mutated caller transport or wallet identity")
 	}
 }

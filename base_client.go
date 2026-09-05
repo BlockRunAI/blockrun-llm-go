@@ -97,7 +97,11 @@ func newBaseClient(privateKey, apiURL string, timeout time.Duration) (*baseClien
 	// private key alongside it would make every API-key user invent a wallet
 	// they never use. apiURL is honoured when the caller passed one so a
 	// self-hosted account gateway still works.
-	if key := resolveAPIKey(privateKey); key != "" {
+	apiKey, keyErr := resolveAPIKey(privateKey)
+	if keyErr != nil {
+		return nil, keyErr
+	}
+	if key := apiKey; key != "" {
 		bc := newAPIKeyBaseClient(key, timeout)
 		if apiURL != "" {
 			bc.apiURL = strings.TrimSuffix(apiURL, "/")
@@ -160,7 +164,11 @@ func newSolanaBaseClient(solanaKey, apiURL, rpcURL string, timeout time.Duration
 	// api.blockrun.ai settles from credit, so there is no Solana transfer to
 	// sign and no reason for NewXClientSolana to refuse the key. rpcURL is
 	// dropped on purpose — nothing on this rail needs a blockhash.
-	if key := resolveAPIKey(solanaKey); key != "" {
+	apiKey, keyErr := resolveAPIKey(solanaKey)
+	if keyErr != nil {
+		return nil, keyErr
+	}
+	if key := apiKey; key != "" {
 		bc := newAPIKeyBaseClient(key, timeout)
 		if apiURL != "" {
 			bc.apiURL = strings.TrimSuffix(apiURL, "/")
@@ -800,21 +808,39 @@ func (bc *baseClient) recordSettledCost(amount, endpoint string) {
 // resolvePollURL resolves a server-supplied relative poll_url against the API
 // host. poll_url comes back as "/api/v1/...": apiURL already ends in "/api",
 // so strip that once to avoid "/api/api/...".
-func (bc *baseClient) resolvePollURL(u string) string {
-	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
-		return u
-	}
-	// Account rail: poll_url is minted by the x402 gateway and is relative to
-	// ITS host, so it arrives as "/api/v1/...". api.blockrun.ai serves the same
-	// route at "/v1/..." and answers "/api/v1/..." with a wrong_host error, so
-	// the prefix has to come off here — the alternative is every async job
-	// (video, slow images) polling a 404 forever.
+func (bc *baseClient) resolvePollURL(u string) (string, error) {
 	if bc.isAPIKey() {
-		return bc.apiURL + strings.TrimPrefix(u, "/api")
+		target, err := url.Parse(u)
+		if err != nil {
+			return "", fmt.Errorf("invalid polling URL")
+		}
+		gateway, err := url.Parse(bc.apiURL)
+		if err != nil {
+			return "", fmt.Errorf("invalid API gateway URL")
+		}
+		if target.IsAbs() || target.Host != "" {
+			originPort := func(v *url.URL) string {
+				if v.Port() != "" {
+					return v.Port()
+				}
+				if v.Scheme == "https" {
+					return "443"
+				}
+				return "80"
+			}
+			if target.User != nil || !strings.EqualFold(target.Scheme, gateway.Scheme) ||
+				!strings.EqualFold(target.Hostname(), gateway.Hostname()) || originPort(target) != originPort(gateway) {
+				return "", fmt.Errorf("refusing to send an API key to a different polling origin")
+			}
+			return u, nil
+		}
+		if strings.HasPrefix(u, "/api/") {
+			u = strings.TrimPrefix(u, "/api")
+		}
+		return strings.TrimRight(bc.apiURL, "/") + "/" + strings.TrimLeft(u, "/"), nil
 	}
-	base := bc.apiURL
-	if strings.HasSuffix(base, "/api") {
-		base = strings.TrimSuffix(base, "/api")
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return u, nil
 	}
-	return base + u
+	return strings.TrimSuffix(bc.apiURL, "/api") + u, nil
 }

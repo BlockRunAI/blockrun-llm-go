@@ -13,7 +13,11 @@ import (
 // sign with it is a keyfile to lose for no benefit. This is what lets an agent
 // or a skill call SetupAgentWallet unconditionally and work on either rail.
 func SetupAgentWallet(opts ...ClientOption) (*LLMClient, error) {
-	if key := resolveAPIKey(""); key != "" {
+	apiKey, keyErr := resolveAPIKey("")
+	if keyErr != nil {
+		return nil, keyErr
+	}
+	if key := apiKey; key != "" {
 		return NewLLMClient(key, opts...)
 	}
 

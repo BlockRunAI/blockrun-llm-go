@@ -75,20 +75,23 @@ func IsAPIKey(credential string) bool {
 // set it keeps the wallet behaviour they already had, and one who has set it
 // meant to, even if an old BLOCKRUN_WALLET_KEY is still sitting in their
 // profile. PaymentMode() exists so that decision is never invisible.
-func resolveAPIKey(credential string) string {
+func resolveAPIKey(credential string) (string, error) {
 	if IsAPIKey(credential) {
-		return strings.TrimSpace(credential)
+		return strings.TrimSpace(credential), nil
 	}
-	// An explicit non-key credential (a wallet key) is a deliberate choice of
-	// the x402 rail and must not be overridden by the environment.
+	// Explicit wallet selection takes precedence, even over an invalid env key.
 	if strings.TrimSpace(credential) != "" {
-		return ""
+		return "", nil
 	}
-	env := strings.TrimSpace(os.Getenv(EnvAPIKey))
-	if IsAPIKey(env) {
-		return env
+	raw, configured := os.LookupEnv(EnvAPIKey)
+	if !configured {
+		return "", nil
 	}
-	return ""
+	env := strings.TrimSpace(raw)
+	if !IsAPIKey(env) {
+		return "", &ValidationError{Field: EnvAPIKey, Message: "Invalid configured API key. Correct or unset it, or explicitly pass a wallet key."}
+	}
+	return env, nil
 }
 
 // newAPIKeyBaseClient builds a baseClient on the account rail. It cannot fail:

@@ -1245,3 +1245,17 @@ Yes. Use `ChatCompletionStream` for SSE streaming — on both rails.
 ## License
 
 MIT
+
+### Changing payment methods safely
+
+Register at [user.blockrun.ai](https://user.blockrun.ai), add credit in
+[Credits](https://user.blockrun.ai/dashboard/credits), and create a key in
+[API keys](https://user.blockrun.ai/dashboard/keys). Set `BLOCKRUN_API_KEY`
+or pass the key as the client's credential. Check activity and actual charges
+in the dashboard; local cost summaries may omit charges without a gateway receipt.
+
+An explicit wallet credential chooses wallet payments even when `BLOCKRUN_API_KEY`
+is set. Choose the Solana wallet client for Solana, or the Base wallet client for
+Base. An empty or invalid `BLOCKRUN_API_KEY` fails instead of silently selecting
+a wallet. Unset it to restore automatic wallet selection. Create a new client
+when changing credentials; an existing client keeps its original account.
