@@ -121,10 +121,13 @@ fmt.Println(result.Response) // "4"
 
 ## How Payment Works
 
-No API keys, no subscription, no invoices. You hold USDC in your own wallet — on
-**Base** (the default) or **Solana** — and **each request pays for itself** with
-an on-chain micropayment. Two phases: fund the wallet once, then every call
-settles automatically.
+**Account API:** use `BLOCKRUN_API_KEY` or a `NewXClientWithAPIKey` constructor
+to pay from prepaid account credits without a wallet. Manage credits and usage
+in the [account dashboard](https://user.blockrun.ai/dashboard).
+
+**Wallet x402:** hold USDC on **Solana** (preferred for new wallets) or **Base**
+and pay per request with on-chain micropayments. No account API key is required
+for wallet payments. Fund the wallet, then the SDK handles payment for each call.
 
 ### 1. Fund your wallet once
 
@@ -1037,18 +1040,18 @@ if err != nil {
 ## Requirements
 
 - Go 1.22+
-- A wallet with USDC on Base — or a Solana wallet with USDC, see [Pay on Solana](#pay-on-solana)
+- An [account API key and credits](#account-api-keys), or a wallet with USDC on [Solana](#pay-on-solana) or Base
 
 ## FAQ
 
 **What is blockrun-llm-go?**
-The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->76<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Uses x402 micropayments — no API keys, no subscriptions. The `-llm-` in the name is history, not scope.
+The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->76<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Supports account API keys with prepaid credits, or x402 USDC micropayments on Solana or Base. The `-llm-` in the name is history, not scope.
 
 **How much does it cost?**
 Pay only for what you use. <!-- br:models.free -->7<!-- /br:models.free --> NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 USDC gets you thousands of paid-model requests.
 
 **Does it support Solana?**
-Yes. Every client has a `NewXClientSolana` counterpart that pays USDC on Solana via `sol.blockrun.ai` — same API, same responses. See [Pay on Solana](#pay-on-solana). Base remains the default.
+Yes. Every client has a `NewXClientSolana` counterpart that pays USDC on Solana via `sol.blockrun.ai` — same API, same responses. See [Pay on Solana](#pay-on-solana). `SetupAgentClient` prefers Solana for new wallets and preserves saved chain choices; existing Base constructors keep their Base behavior. Account API mode requires no chain selection.
 
 **Is streaming supported?**
 Yes. Use `ChatCompletionStream` for SSE streaming.
