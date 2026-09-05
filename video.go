@@ -481,7 +481,10 @@ func (c *VideoClient) pollVideoJob(
 		}
 	}
 
-	pollURL := c.absoluteURL(submitData.PollURL)
+	pollURL, pollErr := c.absoluteURL(submitData.PollURL)
+	if pollErr != nil {
+		return nil, pollErr
+	}
 
 	// Step 4: poll until completed. Base reuses the submit signature; Solana
 	// re-signs with a fresh blockhash once the current one nears expiry.
@@ -589,7 +592,7 @@ func (c *VideoClient) pollVideoJob(
 }
 
 // absoluteURL resolves a server-supplied relative poll_url against the API host.
-func (c *VideoClient) absoluteURL(u string) string {
+func (c *VideoClient) absoluteURL(u string) (string, error) {
 	return c.resolvePollURL(u)
 }
 

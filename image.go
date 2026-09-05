@@ -413,7 +413,10 @@ func (c *ImageClient) pollImageJob(
 		}
 	}
 
-	pollURL := c.resolvePollURL(submitData.PollURL)
+	pollURL, pollErr := c.resolvePollURL(submitData.PollURL)
+	if pollErr != nil {
+		return nil, pollErr
+	}
 
 	deadline := time.Now().Add(imagePollBudget)
 	lastStatus := submitData.Status
