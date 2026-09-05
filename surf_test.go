@@ -20,12 +20,12 @@ func TestSurfEndpoints_Catalog(t *testing.T) {
 	if info == nil {
 		t.Fatal("market/ranking should be in catalog")
 	}
-	if info.Method != "GET" || info.Tier != 1 || info.PriceUSD != 0.001 {
+	if info.Method != "GET" || info.Tier != 1 || info.PriceUSD != 0.0075 {
 		t.Errorf("market/ranking unexpected info: %+v", info)
 	}
 
 	sql := SurfEndpointInfo("onchain/sql")
-	if sql == nil || sql.Method != "POST" || sql.Tier != 3 || sql.PriceUSD != 0.020 {
+	if sql == nil || sql.Method != "POST" || sql.Tier != 3 || sql.PriceUSD != 0.0075 {
 		t.Errorf("onchain/sql unexpected info: %+v", sql)
 	}
 
@@ -36,15 +36,15 @@ func TestSurfEndpoints_Catalog(t *testing.T) {
 
 func TestSurfPrice(t *testing.T) {
 	p, err := SurfPrice("market/ranking")
-	if err != nil || p != 0.001 {
+	if err != nil || p != 0.0075 {
 		t.Errorf("SurfPrice(tier 1) = %v, %v", p, err)
 	}
 	p, err = SurfPrice("token/holders")
-	if err != nil || p != 0.005 {
+	if err != nil || p != 0.0075 {
 		t.Errorf("SurfPrice(tier 2) = %v, %v", p, err)
 	}
 	p, err = SurfPrice("onchain/sql")
-	if err != nil || p != 0.020 {
+	if err != nil || p != 0.0075 {
 		t.Errorf("SurfPrice(tier 3) = %v, %v", p, err)
 	}
 	if _, err := SurfPrice("nope"); err == nil {

@@ -39,7 +39,7 @@ func (c *LLMClient) Status(ctx context.Context) (address string, balance float64
 // a saved chain or a Base-only wallet, preferring Solana for new wallets.
 // Pass "base" or "solana" to choose a wallet chain; "" selects automatically.
 func SetupAgentClient(chain string, opts ...ClientOption) (*LLMClient, error) {
-	if os.Getenv("BLOCKRUN_API_KEY") != "" {
+	if _, configured := os.LookupEnv("BLOCKRUN_API_KEY"); configured {
 		return NewLLMClientWithAPIKey("", opts...)
 	}
 	if chain != "" && chain != "base" && chain != "solana" {

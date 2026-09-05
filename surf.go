@@ -10,18 +10,19 @@ import (
 )
 
 // SurfClient is the BlockRun Surf client — asksurf.ai crypto-data gateway via
-// x402 micropayments.
+// account API keys or x402 micropayments.
 //
 // Surf is a single backend partner exposing ~83 crypto-intelligence endpoints
 // (exchange data, on-chain SQL, prediction markets, wallet/social analytics, …).
 //
-// Pricing is tiered:
+// All tiers currently cost $0.0075/call. Discovery prices are estimates;
+// gateway billing is authoritative:
 //
-//	Tier 1  $0.001  market data, lists, single-token reads
-//	Tier 2  $0.005  AI-derived intelligence (rankings, trends, search)
-//	Tier 3  $0.020  heavy LLM reports + on-chain SQL/structured queries
+//	Tier 1  $0.0075  market data, lists, single-token reads
+//	Tier 2  $0.0075  AI-derived intelligence (rankings, trends, search)
+//	Tier 3  $0.0075  heavy LLM reports + on-chain SQL/structured queries
 //
-// SECURITY: Your private key is used ONLY for local EIP-712 signing.
+// SECURITY: In wallet mode your private key is used ONLY for local signing.
 // The key NEVER leaves your machine — only signatures are transmitted.
 type SurfClient struct {
 	*baseClient
@@ -75,9 +76,9 @@ func NewSurfClient(privateKey string, opts ...SurfClientOption) (*SurfClient, er
 
 // SurfTierPrices mirrors src/lib/surf.ts SURF_TIER_*_PRICE on the backend.
 var SurfTierPrices = map[int]float64{
-	1: 0.001,
-	2: 0.005,
-	3: 0.020,
+	1: 0.0075,
+	2: 0.0075,
+	3: 0.0075,
 }
 
 // SurfEndpoint is a single discovery entry in the Surf catalog.

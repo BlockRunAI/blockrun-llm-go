@@ -7,12 +7,104 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
 const testAPIKey = "brk_live_unit_test"
+
+func TestConfiguredEmptyAPIKeyNeverSelectsWallet(t *testing.T) {
+	for _, key := range []string{"", "   ", "bad"} {
+		t.Run(fmt.Sprintf("key=%q", key), func(t *testing.T) {
+			t.Setenv("BLOCKRUN_API_KEY", key)
+			t.Setenv("BLOCKRUN_WALLET_KEY", testPrivateKey)
+			t.Setenv("SOLANA_WALLET_KEY", testSolanaKey(t))
+			constructors := []func() (*LLMClient, error){
+				func() (*LLMClient, error) { return NewLLMClient("") },
+				func() (*LLMClient, error) { return NewLLMClientSolana("", "") },
+				func() (*LLMClient, error) { return SetupAgentClient("base") },
+			}
+			for i, construct := range constructors {
+				client, err := construct()
+				var validation *ValidationError
+				if client != nil || !errors.As(err, &validation) || validation.Field != "apiKey" {
+					t.Errorf("entry %d selected a wallet or returned the wrong error: %v", i, err)
+				}
+			}
+			// An explicit wallet remains a deliberate wallet selection, even if the API env is invalid.
+			for _, construct := range []func() (*LLMClient, error){
+				func() (*LLMClient, error) { return NewLLMClient(testPrivateKey) },
+				func() (*LLMClient, error) { return NewLLMClientSolana(testSolanaKey(t), "") },
+			} {
+				client, err := construct()
+				if err != nil || client.AuthMode() != "wallet" {
+					t.Fatalf("explicit wallet lost precedence: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestUnsettingAPIKeyRestoresWalletWithoutChangingExistingClient(t *testing.T) {
+	t.Setenv("BLOCKRUN_API_KEY", testAPIKey)
+	t.Setenv("BLOCKRUN_WALLET_KEY", testPrivateKey)
+	account, err := NewLLMClient("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Unsetenv("BLOCKRUN_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	wallet, err := NewLLMClient("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wallet.AuthMode() != "wallet" || wallet.GetWalletAddress() != testWalletAddress || account.AuthMode() != "api-key" {
+		t.Fatal("reconstructing a wallet changed the account client or wallet identity")
+	}
+}
+
+func TestAccountAndWalletCanShareHTTPClientWithoutSharingAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/account/v1/chat/completions":
+			if r.Header.Get("Authorization") != "Bearer "+testAPIKey || r.Header.Get("Payment-Signature") != "" {
+				t.Error("account authentication changed or included a wallet proof")
+			}
+		case "/wallet/v1/chat/completions":
+			if r.Header.Get("Authorization") != "" {
+				t.Error("account key crossed into wallet request")
+			}
+		default:
+			t.Errorf("unexpected endpoint: %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+	}))
+	defer server.Close()
+	shared := server.Client()
+	originalTransport := shared.Transport
+	t.Setenv("BLOCKRUN_API_KEY", testAPIKey)
+	account, err := NewLLMClient("", WithAPIURL(server.URL+"/account"), WithHTTPClient(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wallet, err := NewLLMClient(testPrivateKey, WithAPIURL(server.URL+"/wallet"), WithHTTPClient(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BLOCKRUN_API_KEY", "brk_live_changed_account")
+	t.Setenv("BLOCKRUN_API_BASE_URL", "https://changed.example")
+	for _, client := range []*LLMClient{account, wallet, account} {
+		if reply, err := client.Chat(context.Background(), "openai/gpt-5.2", "hi"); err != nil || reply != "ok" {
+			t.Fatalf("call failed: %q %v", reply, err)
+		}
+	}
+	if shared.Transport != originalTransport || wallet.GetWalletAddress() != testWalletAddress {
+		t.Fatal("account setup mutated caller transport or wallet identity")
+	}
+}
 
 type accountMode interface {
 	AuthMode() string
@@ -241,5 +333,37 @@ func TestAccountStreamRedirectAndValidation(t *testing.T) {
 	}
 	if _, err := NewLLMClientWithAPIKey("bad"); err == nil {
 		t.Fatal("invalid key accepted")
+	}
+}
+
+func TestAccountPollingRecoversExistingJob(t *testing.T) {
+	for _, status := range []int{502, 503, 504, 522, 524} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			count := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				count++
+				if r.Method != http.MethodGet || r.URL.RequestURI() != "/v1/jobs/existing?token=signed" {
+					t.Errorf("wrong poll: %s %s", r.Method, r.URL)
+				}
+				if count == 1 {
+					w.WriteHeader(status)
+					fmt.Fprint(w, `{"error":{"message":"temporary gateway failure"}}`)
+					return
+				}
+				fmt.Fprint(w, `{"status":"completed","id":"existing"}`)
+			}))
+			defer server.Close()
+			client, err := NewLLMClientWithAPIKey(testAPIKey, WithAPIURL(server.URL))
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := client.pollAccount(context.Background(), []byte(`{"status":"queued","poll_url":"/v1/jobs/existing?token=signed"}`), 202, time.Second, time.Millisecond)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), "completed") || count != 2 {
+				t.Fatalf("bad recovery: %s / %d", data, count)
+			}
+		})
 	}
 }

@@ -11,8 +11,18 @@
 
 ## Installation
 
+> **Release status:** As of September 4, 2026, the latest tag `v0.20.0` does not include the account API constructors described below. These examples apply to this source checkout. The default `go get` command will support them only after a release containing these changes.
+
 ```bash
 go get github.com/BlockRunAI/blockrun-llm-go
+```
+
+To evaluate an API-enabled local checkout before release, run this from your
+application's module directory (replace the path with your checkout):
+
+```bash
+go mod edit -replace=github.com/BlockRunAI/blockrun-llm-go=/path/to/blockrun-llm-go
+go mod tidy
 ```
 
 ## Account API keys
@@ -30,6 +40,9 @@ including LLM, Anthropic, image, video, music, speech, voice, phone, portrait,
 RealFace, Surf, and RPC. An empty key reads `BLOCKRUN_API_KEY`. Existing Base and
 Solana constructors also use this environment key when their private-key
 argument is empty; an explicit private key preserves wallet mode.
+A configured but empty or malformed `BLOCKRUN_API_KEY` is an error, not a
+request to charge a wallet. Unset it to restore automatic wallet selection;
+explicit wallet constructors with a non-empty private key keep their behavior.
 
 The account endpoint defaults to `https://api.blockrun.ai/v1`. Set
 `BLOCKRUN_API_BASE_URL` or the client's `With*APIURL` option to override it
@@ -230,7 +243,7 @@ itself works on both chains.
 | Feature | Description |
 |---------|-------------|
 | **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->76<!-- /br:models.chatVisible --> models |
-| **Anthropic Client** | Native Anthropic Messages API with automatic x402 payments |
+| **Anthropic Client** | Native Anthropic Messages API with account credits or x402 wallet payments |
 | **Smart Routing** | Auto-selects the best model for your prompt |
 | **Streaming** | SSE streaming for real-time responses |
 | **Tool Calling** | OpenAI-compatible function/tool calling |
@@ -254,7 +267,7 @@ itself works on both chains.
 
 ## Anthropic Client
 
-Use the native Anthropic Messages API format with BlockRun's x402 payment gateway.
+Use the native Anthropic Messages API format with account credits or an x402 wallet.
 Works with Claude models and any other BlockRun model (OpenAI, Google, etc.) via Anthropic message format.
 Pass any model ID — e.g. `claude-fable-5` (Mythos-class, above Opus), `claude-opus-4-8`, or `claude-sonnet-4-6`.
 
@@ -507,8 +520,8 @@ ie, lu, cn, ca`.
 `RPCClient` wraps `POST /v1/rpc/{network}` — standard JSON-RPC 2.0 access to
 <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains through one endpoint (Ethereum, Base, Solana, Polygon, BSC,
 Arbitrum, Optimism, Avalanche, Bitcoin, Sui, and more; powered by Tatum's RPC
-gateway). No API key, no per-chain endpoints: flat **$0.002 per call** in
-USDC; a JSON-RPC batch charges per element.
+gateway). No separate Tatum API key or per-chain endpoint is needed. Calls use account
+credits or the selected x402 wallet; a JSON-RPC batch is priced per element.
 
 ```go
 rpcClient, err := blockrun.NewRPCClient("")
@@ -607,16 +620,18 @@ _, err = client.ModalSandboxTerminate(ctx, sb["sandbox_id"].(string))
 Access Polymarket, Kalshi, and more via Predexon.
 
 ```go
-// GET endpoints ($0.001/request)
+// GET endpoints ($0.0075/request)
 events, err := client.PM(ctx, "polymarket/events", nil)
 markets, err := client.PM(ctx, "polymarket/search", map[string]string{"q": "bitcoin"})
 
-// POST query endpoints ($0.005/request)
+// POST query endpoints ($0.0075/request)
 result, err := client.PMQuery(ctx, "polymarket/query", map[string]any{
     "filter": "active",
     "limit":  10,
 })
 ```
+
+These service prices are estimates; the gateway quote and account Activity receipt are authoritative. Wallet payment-rail fees may apply separately.
 
 ## Image Generation
 
@@ -718,7 +733,7 @@ Supported models:
 
 | Model | Price |
 |-------|-------|
-| `xai/grok-imagine-video` | $0.05/sec (8s default → $0.42/clip) |
+| `xai/grok-imagine-video` | $0.05/sec at 480p, before applicable fees |
 | `bytedance/seedance-1.5-pro` | $0.03/sec (5s default, up to 10s, 720p) |
 | `bytedance/seedance-2.0-fast` | $0.15/sec (~60-80s gen, sweet-spot price/quality) |
 | `bytedance/seedance-2.0` | $0.30/sec (720p Pro) |
@@ -881,22 +896,22 @@ Failed buys never charge your wallet — settlement is held until Twilio confirm
 
 ## Surf (asksurf.ai)
 
-`SurfClient` wraps `/v1/surf/*` — a single backend partner exposing **~83 crypto-intelligence endpoints** (exchange data, on-chain SQL, prediction markets, wallet/social analytics, project intelligence). Tiered pricing matches the backend:
+`SurfClient` wraps `/v1/surf/*` — a single backend partner exposing **~83 crypto-intelligence endpoints** (exchange data, on-chain SQL, prediction markets, wallet/social analytics, project intelligence). All tiers currently cost $0.0075/call:
 
 | Tier | Price | Examples |
 |------|-------|----------|
-| **1** | $0.001 | `market/ranking`, `exchange/price`, `news/feed`, `prediction-market/polymarket/markets` |
-| **2** | $0.005 | `token/holders`, `social/mindshare`, `search/web`, `wallet/detail` |
-| **3** | $0.020 | `onchain/sql`, `onchain/query`, `onchain/schema` |
+| **1** | $0.0075 | `market/ranking`, `exchange/price`, `news/feed`, `prediction-market/polymarket/markets` |
+| **2** | $0.0075 | `token/holders`, `social/mindshare`, `search/web`, `wallet/detail` |
+| **3** | $0.0075 | `onchain/sql`, `onchain/query`, `onchain/schema` |
 
 ```go
 surf, err := blockrun.NewSurfClient("")
 
 // Discovery
 for _, e := range blockrun.SurfEndpoints() {
-    fmt.Printf("%-50s %s tier=%d $%.3f\n", e.Path, e.Method, e.Tier, e.PriceUSD)
+    fmt.Printf("%-50s %s tier=%d $%.4f\n", e.Path, e.Method, e.Tier, e.PriceUSD)
 }
-price, _ := blockrun.SurfPrice("onchain/sql") // 0.020
+price, _ := blockrun.SurfPrice("onchain/sql") // 0.0075
 
 // GET — pass query params (any value; converted to strings, []string joined with comma)
 top, err := surf.Get(ctx, "market/ranking", map[string]any{"limit": 20})
@@ -914,6 +929,8 @@ out, err := surf.Call(ctx, "token/holders", blockrun.SurfCallOptions{
 ```
 
 Required-param validation runs client-side before the network round trip (e.g. `exchange/price` requires `pair`), so missing params surface as a `*ValidationError` instead of a 400 round-trip.
+
+These service prices are estimates; the gateway quote and account Activity receipt are authoritative. Wallet payment-rail fees may apply separately.
 
 ## Response Caching
 
@@ -1011,7 +1028,9 @@ Use `client.ListModels(ctx)` for the full list with current pricing.
 |----------|-------------|----------|
 | `BASE_CHAIN_WALLET_KEY` | Base chain wallet private key | Yes (or pass to constructor) |
 | `BLOCKRUN_WALLET_KEY` | Alias for BASE_CHAIN_WALLET_KEY | No |
-| `BLOCKRUN_API_URL` | Custom API endpoint | No (default: https://blockrun.ai/api) |
+| `BLOCKRUN_API_KEY` | Account API key; no payment wallet required | Account mode |
+| `BLOCKRUN_API_BASE_URL` | Account gateway override (default: https://api.blockrun.ai/v1) | No |
+| `BLOCKRUN_API_URL` | Custom wallet gateway endpoint | No (default: https://blockrun.ai/api) |
 
 ## Error Handling
 
@@ -1068,3 +1087,15 @@ Yes. Use `ChatCompletionStream` for SSE streaming.
 ## License
 
 MIT
+
+
+## Account setup, billing, and switching back to wallets
+
+1. [Sign in to BlockRun](https://user.blockrun.ai), open [Billing](https://user.blockrun.ai/dashboard/credits), and add prepaid account credits. The checkout shows both the credit amount and the total card charge, including any processing fee; these amounts can differ.
+2. Create a key on [API Keys](https://user.blockrun.ai/dashboard/keys). Keep it in your server or local process environment as `BLOCKRUN_API_KEY`; never put it in browser code, logs, or a repository. Follow this README's client configuration example.
+3. Check [Activity](https://user.blockrun.ai/dashboard/activity) after a call. Chat uses reported token usage; media and data services can use per-image, duration, or per-request prices. Account credits and an on-chain USDC wallet are separate balances. Local wallet spend counters are not account receipts.
+4. A 401 means check the API key, 402 means check account credits or account status, and 429 means respect `Retry-After`. Poll an accepted media job using the complete returned `poll_url`, including its query parameters, with the same account key. Do not reconstruct the URL from the job ID. If polling times out, check that job and Activity before submitting another paid job.
+
+Accepted account jobs recover from temporary gateway polling errors by querying the same job within the original deadline. They do not resubmit the paid creation request. Authentication, credit, and rate-limit errors remain visible to the caller.
+
+To return to wallet billing, unset `BLOCKRUN_API_KEY` and construct a new wallet client, or pass an explicit non-empty private key to a chain-specific wallet constructor. Existing wallet keys and saved chain choices are preserved. `SetupAgentClient` prefers Solana for new wallets; existing Base constructors retain Base behavior.

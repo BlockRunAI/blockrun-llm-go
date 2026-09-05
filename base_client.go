@@ -84,7 +84,7 @@ func (bc *baseClient) hasWallet() bool {
 // If privateKey is empty, it checks BLOCKRUN_WALLET_KEY then BASE_CHAIN_WALLET_KEY env vars.
 // If apiURL is empty, DefaultAPIURL is used; BLOCKRUN_API_URL env var can override.
 func newBaseClient(privateKey, apiURL string, timeout time.Duration) (*baseClient, error) {
-	if privateKey == "" && os.Getenv("BLOCKRUN_API_KEY") != "" {
+	if _, configured := os.LookupEnv("BLOCKRUN_API_KEY"); privateKey == "" && configured {
 		return newAccountBaseClient("", "", timeout)
 	}
 	// Get private key from param or environment
@@ -138,7 +138,7 @@ func newBaseClient(privateKey, apiURL string, timeout time.Duration) (*baseClien
 // DefaultSolanaAPIURL is used; BLOCKRUN_SOLANA_API_URL can override. If rpcURL is
 // empty, DefaultSolanaRPCURL is used; SOLANA_RPC_URL can override.
 func newSolanaBaseClient(solanaKey, apiURL, rpcURL string, timeout time.Duration) (*baseClient, error) {
-	if solanaKey == "" && os.Getenv("BLOCKRUN_API_KEY") != "" {
+	if _, configured := os.LookupEnv("BLOCKRUN_API_KEY"); solanaKey == "" && configured {
 		return newAccountBaseClient("", "", timeout)
 	}
 	key := solanaKey

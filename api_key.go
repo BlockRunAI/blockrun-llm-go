@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -189,6 +190,14 @@ func (bc *baseClient) pollAccount(ctx context.Context, data []byte, status int, 
 		}
 		resp, err := bc.APIRequest(ctx, http.MethodGet, pollURL, nil)
 		if err != nil {
+			var apiErr *APIError
+			if errors.As(err, &apiErr) {
+				switch apiErr.StatusCode {
+				case 502, 503, 504, 522, 524:
+					// Retry only this existing job's GET, within the original deadline.
+					continue
+				}
+			}
 			return nil, err
 		}
 		data, err = io.ReadAll(resp.Body)

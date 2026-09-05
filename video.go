@@ -525,7 +525,7 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 	return nil, &APIError{
 		StatusCode: http.StatusGatewayTimeout,
 		Message: fmt.Sprintf(
-			"Video generation did not complete within %.0fs (last status: %s). No payment was taken.",
+			"Video generation did not complete within %.0fs (last status: %s). A polling timeout does not confirm billing status. Check the existing job and account Activity or wallet receipts before submitting another job.",
 			videoPollBudget.Seconds(), lastStatus,
 		),
 	}
