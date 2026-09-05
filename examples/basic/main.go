@@ -1,8 +1,14 @@
 // Example usage of the BlockRun LLM Go SDK.
 //
-// To run this example:
+// To run this example with an API key from user.blockrun.ai:
 //
-//	export BASE_CHAIN_WALLET_KEY="0x..."
+//	export BLOCKRUN_API_KEY="brk_live_..."
+//	go run main.go
+//
+// …or with a wallet, paying per call in USDC over x402:
+//
+//	export SOLANA_WALLET_KEY="..."       # Solana
+//	export BASE_CHAIN_WALLET_KEY="0x..." # Base
 //	go run main.go
 package main
 
@@ -17,13 +23,18 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// Create client (uses BASE_CHAIN_WALLET_KEY env var)
+	// Create client. BLOCKRUN_API_KEY wins if set; otherwise a wallet key.
 	client, err := blockrun.NewLLMClient("")
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	fmt.Printf("Wallet address: %s\n\n", client.GetWalletAddress())
+	// An API-key client has no wallet address — credit lives on the dashboard.
+	if client.PaymentMode() == blockrun.PaymentModeAPIKey {
+		fmt.Printf("Paying from prepaid credit (user.blockrun.ai)\n\n")
+	} else {
+		fmt.Printf("Wallet address: %s\n\n", client.GetWalletAddress())
+	}
 
 	// Example 1: Simple 1-line chat
 	fmt.Println("=== Simple Chat ===")

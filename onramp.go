@@ -41,6 +41,11 @@ type OnrampResult struct {
 // Base / USDC only. Returns an error if address is malformed, the gateway is
 // unreachable or unconfigured, or no valid onramp URL is returned.
 func (c *LLMClient) Onramp(ctx context.Context, address string) (*OnrampResult, error) {
+	// Onramp funds a wallet, and an API-key account has none: credit is bought
+	// with a card at user.blockrun.ai, not minted into an address here.
+	if c.isAPIKey() {
+		return nil, walletOnly("Onramp")
+	}
 	address = strings.TrimSpace(address)
 	if !evmAddressRegex.MatchString(address) {
 		return nil, &ValidationError{
