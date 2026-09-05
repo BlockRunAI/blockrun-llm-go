@@ -64,7 +64,12 @@ const (
 // IsAPIKey reports whether a credential string is a BlockRun API key rather
 // than a wallet private key.
 func IsAPIKey(credential string) bool {
-	return strings.HasPrefix(strings.TrimSpace(credential), APIKeyPrefix)
+	// The prefix alone is not a key. A truncated secret ("brk_") would
+	// otherwise select the account rail and fail at request time with a 401,
+	// which is the opposite of this rail's promise that a bad credential fails
+	// where you set it rather than where you use it.
+	return len(strings.TrimSpace(credential)) > len(APIKeyPrefix) &&
+		strings.HasPrefix(strings.TrimSpace(credential), APIKeyPrefix)
 }
 
 // resolveAPIKey decides whether a constructor call is an API-key call.
@@ -83,13 +88,22 @@ func resolveAPIKey(credential string) (string, error) {
 	if strings.TrimSpace(credential) != "" {
 		return "", nil
 	}
-	raw, configured := os.LookupEnv(EnvAPIKey)
-	if !configured {
+	// Blank is unset, not invalid. `BLOCKRUN_API_KEY=` in a .env file, a bare
+	// `docker -e BLOCKRUN_API_KEY`, and an unpopulated `${{ secrets.X }}` all
+	// arrive as the empty string, and every one of them means "I am not on the
+	// account rail" — erroring there breaks wallet users who never opted in,
+	// on upgrade, in CI. Keying on os.LookupEnv instead of the value made all
+	// three a hard failure.
+	//
+	// A non-blank value that is not a key is a different thing: someone typed a
+	// credential and got it wrong, and silently spending USDC instead of credit
+	// is the wrong way to tell them.
+	env := strings.TrimSpace(os.Getenv(EnvAPIKey))
+	if env == "" {
 		return "", nil
 	}
-	env := strings.TrimSpace(raw)
 	if !IsAPIKey(env) {
-		return "", &ValidationError{Field: EnvAPIKey, Message: "Invalid configured API key. Correct or unset it, or explicitly pass a wallet key."}
+		return "", &ValidationError{Field: EnvAPIKey, Message: "Invalid configured API key: expected a key starting with \"brk_\". Correct it, clear it, or explicitly pass a wallet key."}
 	}
 	return env, nil
 }

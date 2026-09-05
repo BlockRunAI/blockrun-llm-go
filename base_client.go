@@ -809,38 +809,89 @@ func (bc *baseClient) recordSettledCost(amount, endpoint string) {
 // host. poll_url comes back as "/api/v1/...": apiURL already ends in "/api",
 // so strip that once to avoid "/api/api/...".
 func (bc *baseClient) resolvePollURL(u string) (string, error) {
-	if bc.isAPIKey() {
-		target, err := url.Parse(u)
-		if err != nil {
-			return "", fmt.Errorf("invalid polling URL")
-		}
-		gateway, err := url.Parse(bc.apiURL)
-		if err != nil {
-			return "", fmt.Errorf("invalid API gateway URL")
-		}
-		if target.IsAbs() || target.Host != "" {
-			originPort := func(v *url.URL) string {
-				if v.Port() != "" {
-					return v.Port()
-				}
-				if v.Scheme == "https" {
-					return "443"
-				}
-				return "80"
-			}
-			if target.User != nil || !strings.EqualFold(target.Scheme, gateway.Scheme) ||
-				!strings.EqualFold(target.Hostname(), gateway.Hostname()) || originPort(target) != originPort(gateway) {
-				return "", fmt.Errorf("refusing to send an API key to a different polling origin")
-			}
-			return u, nil
-		}
-		if strings.HasPrefix(u, "/api/") {
-			u = strings.TrimPrefix(u, "/api")
-		}
-		return strings.TrimRight(bc.apiURL, "/") + "/" + strings.TrimLeft(u, "/"), nil
+	target, err := url.Parse(u)
+	if err != nil {
+		return "", fmt.Errorf("invalid polling URL")
 	}
-	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+	base := bc.apiURL
+	if !bc.isAPIKey() {
+		base = strings.TrimSuffix(base, "/api")
+	}
+	gateway, err := url.Parse(base)
+	if err != nil {
+		return "", fmt.Errorf("invalid API gateway URL")
+	}
+
+	// An absolute poll_url has to prove it points at our own gateway before we
+	// attach anything to it.
+	//
+	// Both rails, not just the account one. The API key is the obvious
+	// credential, but PAYMENT-SIGNATURE is one too: image.go and video.go set
+	// it on every poll, so a gateway answering with
+	// poll_url: "https://attacker.example/job" collects a signed payment
+	// authorization. It can only ever pay BlockRun's own treasury, so this is
+	// disclosure plus griefing — burn the nonce and the caller's real
+	// settlement fails as a replay — rather than theft. Guarding one rail and
+	// not the other, in this one function, was the asymmetry worth closing.
+	if target.IsAbs() || target.Host != "" {
+		if target.User != nil || !sameOrigin(target, gateway) {
+			return "", fmt.Errorf("refusing to send a payment credential to a different polling origin")
+		}
+		// Same origin, so the prefix still has to come off: an absolute
+		// "https://api.blockrun.ai/api/v1/..." would otherwise reach the
+		// account rail as /api/v1 and answer wrong_host, which is the exact
+		// failure this function exists to prevent.
+		if bc.isAPIKey() {
+			return strings.TrimRight(base, "/") + normalizeAccountPath(target.EscapedPath()) + queryAndFragment(target), nil
+		}
 		return u, nil
 	}
-	return strings.TrimSuffix(bc.apiURL, "/api") + u, nil
+
+	if bc.isAPIKey() {
+		return strings.TrimRight(base, "/") + normalizeAccountPath(u), nil
+	}
+	return base + u, nil
+}
+
+// sameOrigin compares scheme, host and port, defaulting the port from the
+// scheme so "https://h" and "https://h:443" are one origin rather than two.
+func sameOrigin(a, b *url.URL) bool {
+	port := func(v *url.URL) string {
+		if v.Port() != "" {
+			return v.Port()
+		}
+		if strings.EqualFold(v.Scheme, "https") {
+			return "443"
+		}
+		return "80"
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) &&
+		port(a) == port(b)
+}
+
+// normalizeAccountPath drops the x402 gateway's "/api" mount and guarantees a
+// single leading slash. poll_url is minted relative to blockrun.ai, which
+// serves /api/v1/...; api.blockrun.ai serves the same route at /v1/... and
+// answers /api/v1/... with wrong_host.
+func normalizeAccountPath(p string) string {
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	if p == "/api" {
+		return "/"
+	}
+	return strings.TrimPrefix(p, "/api")
+}
+
+// queryAndFragment re-attaches the parts EscapedPath drops.
+func queryAndFragment(u *url.URL) string {
+	out := ""
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	if u.Fragment != "" {
+		out += "#" + u.EscapedFragment()
+	}
+	return out
 }

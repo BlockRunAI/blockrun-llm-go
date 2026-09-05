@@ -330,6 +330,20 @@ either rail.
 - **`GetSpending()` is a floor, not a total** — see [Cost Tracking](#cost-tracking).
 - **Nothing else.** Every method, option and response type is identical.
 
+### Switching between the rails
+
+An explicit wallet credential chooses the wallet rail even when
+`BLOCKRUN_API_KEY` is set, so `NewLLMClient("0x…")` always pays on-chain. A
+**blank** `BLOCKRUN_API_KEY` counts as unset — that is what `docker -e
+BLOCKRUN_API_KEY`, an unpopulated `${{ secrets.X }}`, and a bare
+`BLOCKRUN_API_KEY=` line all produce, and none of them mean you wanted the
+account rail. A **non-blank** value that is not a key is an error rather than a
+silent fall back to a wallet: someone typed a credential and got it wrong, and
+spending USDC instead of credit is the wrong way to tell them.
+
+Credentials are read once, at construction. Build a new client to change rails;
+an existing one keeps the account it started with.
+
 ### Environment
 
 ```bash
@@ -1245,17 +1259,3 @@ Yes. Use `ChatCompletionStream` for SSE streaming — on both rails.
 ## License
 
 MIT
-
-### Changing payment methods safely
-
-Register at [user.blockrun.ai](https://user.blockrun.ai), add credit in
-[Credits](https://user.blockrun.ai/dashboard/credits), and create a key in
-[API keys](https://user.blockrun.ai/dashboard/keys). Set `BLOCKRUN_API_KEY`
-or pass the key as the client's credential. Check activity and actual charges
-in the dashboard; local cost summaries may omit charges without a gateway receipt.
-
-An explicit wallet credential chooses wallet payments even when `BLOCKRUN_API_KEY`
-is set. Choose the Solana wallet client for Solana, or the Base wallet client for
-Base. An empty or invalid `BLOCKRUN_API_KEY` fails instead of silently selecting
-a wallet. Unset it to restore automatic wallet selection. Create a new client
-when changing credentials; an existing client keeps its original account.

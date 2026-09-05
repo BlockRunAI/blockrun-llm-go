@@ -3,6 +3,7 @@ package blockrun
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -457,8 +458,13 @@ func TestAPIKeyPaidGETCarriesTheKey(t *testing.T) {
 	}
 }
 
+// Narrowed from the original: "" and "   " used to be asserted as errors here
+// too, which is the regression TestBlankEnvKeyIsUnsetNotInvalid covers. A blank
+// value is how an unpopulated CI secret and a bare `docker -e` arrive, so it
+// means unset. A non-blank non-key stays an error, which is the half that
+// protects the money.
 func TestInvalidAPIKeyEnvDoesNotSelectWallet(t *testing.T) {
-	for _, value := range []string{"", "   ", "not-a-key"} {
+	for _, value := range []string{"not-a-key", "sk-wrong-vendor"} {
 		t.Run("invalid="+value, func(t *testing.T) {
 			t.Setenv(EnvAPIKey, value)
 			t.Setenv("BLOCKRUN_WALLET_KEY", testPrivateKey)
@@ -550,5 +556,125 @@ func TestAccountAndWalletCanShareHTTPClientWithoutSharingAuth(t *testing.T) {
 	}
 	if shared.Transport != originalTransport || wallet.GetWalletAddress() != testWalletAddress {
 		t.Fatal("account setup mutated caller transport or wallet identity")
+	}
+}
+
+// A blank BLOCKRUN_API_KEY is unset, not invalid.
+//
+// The first version of this guard keyed on os.LookupEnv, so a variable that was
+// SET but empty counted as configured and hard-failed. `docker -e
+// BLOCKRUN_API_KEY`, an unpopulated `${{ secrets.X }}`, and a bare
+// `BLOCKRUN_API_KEY=` line all produce exactly that, which made every one of
+// them break a wallet user's CI on upgrade.
+func TestBlankEnvKeyIsUnsetNotInvalid(t *testing.T) {
+	for _, blank := range []string{"", "   ", "\t\n"} {
+		t.Run(fmt.Sprintf("value=%q", blank), func(t *testing.T) {
+			t.Setenv(EnvAPIKey, blank)
+			t.Setenv("BLOCKRUN_WALLET_KEY", testPrivateKey)
+
+			client, err := NewLLMClient("")
+			if err != nil {
+				t.Fatalf("blank %s refused a wallet user: %v", EnvAPIKey, err)
+			}
+			if client.PaymentMode() != PaymentModeWallet {
+				t.Errorf("PaymentMode = %q, want %q", client.PaymentMode(), PaymentModeWallet)
+			}
+		})
+	}
+}
+
+// A non-blank value that is not a key is the opposite case: someone typed a
+// credential and got it wrong, and silently spending USDC instead of credit is
+// the wrong way to tell them.
+func TestMalformedEnvKeyRefusesRatherThanFallingBack(t *testing.T) {
+	for _, bad := range []string{"oops-typo", "sk-not-ours", APIKeyPrefix} {
+		t.Run(bad, func(t *testing.T) {
+			t.Setenv(EnvAPIKey, bad)
+			t.Setenv("BLOCKRUN_WALLET_KEY", testPrivateKey)
+
+			if _, err := NewLLMClient(""); err == nil {
+				t.Errorf("%q silently selected a wallet", bad)
+			}
+		})
+	}
+}
+
+// The prefix alone is a truncated secret, not a key.
+func TestBarePrefixIsNotAKey(t *testing.T) {
+	if IsAPIKey(APIKeyPrefix) {
+		t.Errorf("IsAPIKey(%q) = true: a truncated secret would select the account rail and 401 later", APIKeyPrefix)
+	}
+	if !IsAPIKey(APIKeyPrefix + "x") {
+		t.Errorf("IsAPIKey(%q) = false", APIKeyPrefix+"x")
+	}
+}
+
+// The origin guard covers BOTH rails.
+//
+// The API key is the obvious credential, but PAYMENT-SIGNATURE is one too:
+// image.go and video.go set it on every poll, so a gateway answering with an
+// off-origin poll_url collects a signed payment authorization. Guarding one
+// rail and not the other was the asymmetry this closes.
+func TestPollURLRefusesForeignOriginOnBothRails(t *testing.T) {
+	apiKeyClient, err := NewLLMClient(testAPIKey)
+	if err != nil {
+		t.Fatalf("NewLLMClient: %v", err)
+	}
+	walletClient, err := NewLLMClient(testPrivateKey)
+	if err != nil {
+		t.Fatalf("NewLLMClient: %v", err)
+	}
+
+	hostile := []string{
+		"https://attacker.example/job",
+		"http://attacker.example/job",
+		"//attacker.example/job",               // protocol-relative
+		"https://user:pw@api.blockrun.ai/v1/x", // credentials smuggled in
+	}
+	for _, rail := range []struct {
+		name   string
+		client *LLMClient
+	}{{"account", apiKeyClient}, {"wallet", walletClient}} {
+		for _, u := range hostile {
+			if _, err := rail.client.resolvePollURL(u); err == nil {
+				t.Errorf("%s rail accepted %q — a credential would be sent there", rail.name, u)
+			}
+		}
+	}
+}
+
+// Same origin is still served, including the shapes that are one origin written
+// two ways.
+func TestPollURLAcceptsSameOrigin(t *testing.T) {
+	c, err := NewLLMClient(testAPIKey)
+	if err != nil {
+		t.Fatalf("NewLLMClient: %v", err)
+	}
+	for _, u := range []string{
+		DefaultAPIKeyURL + "/v1/images/generations/job_1",
+		"https://api.blockrun.ai:443/v1/images/generations/job_1", // explicit default port
+		"HTTPS://API.BLOCKRUN.AI/v1/images/generations/job_1",     // case variance
+	} {
+		if _, err := c.resolvePollURL(u); err != nil {
+			t.Errorf("same-origin %q refused: %v", u, err)
+		}
+	}
+}
+
+// An absolute same-origin poll_url still has to lose the gateway's /api mount,
+// or it reaches the account rail as /api/v1 and answers wrong_host — the exact
+// failure resolvePollURL exists to prevent.
+func TestAbsoluteSameOriginStillStripsTheAPIMount(t *testing.T) {
+	c, err := NewLLMClient(testAPIKey)
+	if err != nil {
+		t.Fatalf("NewLLMClient: %v", err)
+	}
+	got, err := c.resolvePollURL(DefaultAPIKeyURL + "/api/v1/videos/generations/job_1?d=8")
+	if err != nil {
+		t.Fatalf("resolvePollURL: %v", err)
+	}
+	want := DefaultAPIKeyURL + "/v1/videos/generations/job_1?d=8"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
