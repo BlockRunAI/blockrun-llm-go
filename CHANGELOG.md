@@ -2,6 +2,34 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.21.1
+
+- **fix(apikey): a credential that is wrong fails where you set it, not where
+  you spend it.** `BLOCKRUN_API_KEY` was validated by prefix only, so a
+  truncated secret (`brk_`) selected the account rail and 401'd at request time,
+  and a typo'd value fell through to a wallet — spending USDC instead of credit
+  with nothing on screen to say so. Both now error at construction. A **blank**
+  value stays "unset": `docker -e BLOCKRUN_API_KEY`, an unpopulated
+  `${{ secrets.X }}` and a bare `BLOCKRUN_API_KEY=` line all arrive that way and
+  none of them mean the account rail.
+
+- **fix(security): a poll_url may not take a payment credential off-origin.**
+  `resolvePollURL` returned a server-supplied absolute URL unchanged, and the
+  poll loops then attached `Authorization: Bearer` (account rail) or
+  `PAYMENT-SIGNATURE` (wallet rail) to it. A gateway answering
+  `poll_url: "https://attacker.example/job"` collected the credential. Both
+  rails now require scheme, host and port to match the configured gateway, and
+  reject a URL carrying embedded userinfo. The signed payment can only ever pay
+  BlockRun's treasury, so the exposure was disclosure plus nonce-griefing rather
+  than theft.
+
+- **fix(apikey): an absolute same-origin poll_url loses the gateway's `/api`
+  mount.** `https://api.blockrun.ai/api/v1/…` reached the account rail as
+  `/api/v1` and answered `wrong_host` — the failure `resolvePollURL` exists to
+  prevent, for the one URL shape it did not cover. Query and fragment are
+  carried through, which the video poll needs: the billable duration is signed
+  into the query string.
+
 ## 0.21.0
 
 - **feat(apikey): the SDK accepts a BlockRun API key, not only a wallet.**
