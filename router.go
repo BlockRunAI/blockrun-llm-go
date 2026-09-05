@@ -53,10 +53,11 @@ type SmartChatOptions struct {
 
 // routingTable maps (profile, tier) to the model to use.
 //
-// Moonshot flagship promotion (2026-04-29): kimi-k2.6 is now the catalog
-// flagship (256K context, vision + reasoning_content). kimi-k2.5 is hidden
-// in /v1/models as superseded; chat completions still serves it for clients
-// pinned to its pricing, but the SmartChat default now points at k2.6.
+// Moonshot flagship promotion (2026-06-15): kimi-k2.7 is now the catalog
+// flagship (256K context, image+video input, reasoning_content). kimi-k2.6 and
+// kimi-k2.5 are hidden:true in /v1/models as superseded; chat completions still
+// serves them for clients pinned to their pricing, but the SmartChat default
+// now points at k2.7.
 //
 // DeepSeek V4 family (2026-04-24, paid catalog): deepseek/deepseek-chat and
 // deepseek/deepseek-reasoner are now V4 Flash chat / thinking modes
@@ -97,11 +98,11 @@ var routingTable = map[RoutingProfile]map[RoutingTier]string{
 		TierComplex: "nvidia/qwen3-coder-480b", TierReasoning: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
 	},
 	RoutingEco: {
-		TierSimple: "moonshot/kimi-k2.6", TierMedium: "deepseek/deepseek-chat",
+		TierSimple: "moonshot/kimi-k2.7", TierMedium: "deepseek/deepseek-chat",
 		TierComplex: "google/gemini-2.5-pro", TierReasoning: "deepseek/deepseek-reasoner",
 	},
 	RoutingAuto: {
-		TierSimple: "moonshot/kimi-k2.6", TierMedium: "google/gemini-3.5-flash",
+		TierSimple: "moonshot/kimi-k2.7", TierMedium: "google/gemini-3.5-flash",
 		TierComplex: "google/gemini-3.1-pro", TierReasoning: "deepseek/deepseek-reasoner",
 	},
 	RoutingPremium: {
