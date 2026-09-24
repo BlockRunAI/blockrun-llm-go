@@ -1,6 +1,6 @@
 # BlockRun Go SDK
 
-> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->78<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request — no subscription, no seats, no minimum.
+> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->77<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request — no subscription, no seats, no minimum.
 >
 > **Two ways to pay, same SDK, same catalogue.** Sign up at
 > **[user.blockrun.ai](https://user.blockrun.ai)** for an API key and prepaid
@@ -360,7 +360,7 @@ host you configured for a different rail.
 | Feature | Description |
 |---------|-------------|
 | **Two payment rails** | API key + prepaid credit (`user.blockrun.ai`), or x402 USDC from your own wallet on Solana / Base |
-| **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->78<!-- /br:models.chatVisible --> models |
+| **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->77<!-- /br:models.chatVisible --> models |
 | **Anthropic Client** | Native Anthropic Messages API with automatic x402 payments |
 | **Smart Routing** | Auto-selects the best model for your prompt |
 | **Streaming** | SSE streaming for real-time responses |
@@ -1226,7 +1226,7 @@ if err != nil {
 ## FAQ
 
 **What is blockrun-llm-go?**
-The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->78<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Pay with an API key and prepaid credit, or with x402 micropayments from your own wallet. No subscriptions either way. The `-llm-` in the name is history, not scope.
+The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->77<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Pay with an API key and prepaid credit, or with x402 micropayments from your own wallet. No subscriptions either way. The `-llm-` in the name is history, not scope.
 
 **Do I need a crypto wallet?**
 No. Sign up at [user.blockrun.ai](https://user.blockrun.ai), mint an API key, top up with a card, and `export BLOCKRUN_API_KEY=brk_live_…`. See [API Keys & Accounts](#api-keys--accounts-userblockrunai). A wallet is the other option, not a requirement.
