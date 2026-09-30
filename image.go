@@ -242,9 +242,11 @@ func (c *ImageClient) Edit(ctx context.Context, prompt string, images []string, 
 // submitImageAndMaybePoll runs the gateway's hybrid image pipeline shared by
 // Generate and Edit. Fast models complete inline: POST (402 → sign → retry)
 // returns 200 with image data and payment settled in the same call. Slow
-// models return 202 { id, poll_url } instead; the gateway settles USDC only
-// on the first poll that observes status=completed, so an upstream failure or
-// a caller giving up costs nothing. This client GET-polls poll_url with the
+// models return 202 { id, poll_url } instead. On Base the gateway settles USDC
+// only on the first poll that observes status=completed, so an upstream failure
+// or a caller giving up costs nothing. On Solana it settles at submit — a signed
+// transaction dies with its ~60-90s blockhash, too soon to wait for a render —
+// so the 202 has already been charged. This client GET-polls poll_url with the
 // same wallet's PAYMENT-SIGNATURE until the job reaches a terminal state,
 // then returns the same ImageResponse shape as the fast path — callers never
 // see the async envelope.
@@ -388,8 +390,10 @@ type imagePayment struct {
 // charge comes from, which is why `pay` is a parameter rather than a branch
 // inside the loop body.
 //
-// On the wallet rail the gateway settles USDC on the first poll that observes
-// "completed", so the cost is recorded exactly there. On the account rail the
+// On the Base wallet rail the gateway settles USDC on the first poll that
+// observes "completed", so the cost is recorded exactly there. On Solana it
+// settled at submit, so the cost is recorded before the first poll — a job that
+// then fails or times out was still charged. On the account rail the
 // completed payload carries its own price and recordAPIKeyCost books that.
 func (c *ImageClient) pollImageJob(
 	ctx context.Context,
@@ -430,6 +434,10 @@ func (c *ImageClient) pollImageJob(
 		pollSig = pay.payload
 	}
 	lastSigned := time.Now()
+	settledAtSubmit := pay != nil && c.isSolana()
+	if settledAtSubmit {
+		c.recordSettledCost(pay.option.Amount, endpoint)
+	}
 
 	for time.Now().Before(deadline) {
 		select {
@@ -474,6 +482,8 @@ func (c *ImageClient) pollImageJob(
 			note := " (no payment was taken)"
 			if pay == nil {
 				note = ""
+			} else if settledAtSubmit {
+				note = " (payment was settled at submit)"
 			}
 			return nil, &APIError{
 				StatusCode: pollResp.StatusCode,
@@ -485,9 +495,11 @@ func (c *ImageClient) pollImageJob(
 		// the charge is irreversible at that point. Record the cost as soon
 		// as completion is observed, then decode.
 		if lastStatus == "completed" {
-			if pay != nil {
+			switch {
+			case settledAtSubmit: // recorded at submit
+			case pay != nil:
 				c.recordSettledCost(pay.option.Amount, endpoint)
-			} else {
+			default:
 				c.recordAPIKeyCost(pollBytes, endpoint)
 			}
 			return decodeImageResponse(pollBytes, pollResp.Header)
@@ -509,6 +521,8 @@ func (c *ImageClient) pollImageJob(
 	unpaid := " No payment was taken."
 	if pay == nil {
 		unpaid = ""
+	} else if settledAtSubmit {
+		unpaid = " Payment was settled at submit; the job stays claimable at its poll_url."
 	}
 	return nil, &APIError{
 		StatusCode: http.StatusGatewayTimeout,
