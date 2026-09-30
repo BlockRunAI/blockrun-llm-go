@@ -2,6 +2,18 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.21.2
+
+- **fix(solana): images settle at POST, and `ImageClient` now accounts for it.**
+  A slow model answers 202 + `poll_url`. On Solana the gateway settles at
+  submit — a signed transaction dies with its ~60-90s blockhash, too soon to
+  wait for a render — and the poll only delivers. The shared poll loop assumed
+  Base semantics: the cost was booked only on completion, so a job that failed
+  or timed out after the 202 was charged on-chain but missing from
+  `GetSpending()`, and the error said "no payment was taken". On Solana the
+  cost is now booked at submit and the errors say the payment was settled.
+  Base and the account rail are unchanged.
+
 ## 0.21.1
 
 - **fix(apikey): a credential that is wrong fails where you set it, not where
