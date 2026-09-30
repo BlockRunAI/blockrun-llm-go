@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -326,5 +328,59 @@ func TestImageClientGenerateAsyncFailedNotCharged(t *testing.T) {
 	}
 	if got := client.GetSpending().TotalUSD; got != 0 {
 		t.Errorf("failed job must not record spending, got %f", got)
+	}
+}
+
+// Solana image routes settle at POST (the signed transaction dies with its
+// blockhash long before a slow render ends), so a job that fails after the 202
+// was still charged: the cost is booked at submit, and the error must not
+// claim "no payment was taken".
+func TestImageClientSolanaAsyncFailedIsChargedAtSubmit(t *testing.T) {
+	rpc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":{"value":{"blockhash":%q}}}`, makeBlockhash(t).String())
+	}))
+	defer rpc.Close()
+	resetSolanaBlockhashCacheForTest(t)
+
+	opt := testPaymentOption(USDCSolanaMainnet) // Amount 1000 = $0.001
+	opt.Extra["recentBlockhash"] = makeBlockhash(t).String()
+	pr := PaymentRequirement{
+		X402Version: 2,
+		Accepts:     []PaymentOption{*opt},
+		Resource:    ResourceInfo{URL: "https://sol.blockrun.ai/api/v1/images/generations", Description: "Image"},
+	}
+	prJSON, _ := json.Marshal(pr)
+	prHeader := base64.StdEncoding.EncodeToString(prJSON)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "img_job1", "status": "failed", "error": "upstream exploded"})
+			return
+		}
+		if r.Header.Get("PAYMENT-SIGNATURE") == "" {
+			w.Header().Set("payment-required", prHeader)
+			w.WriteHeader(http.StatusPaymentRequired)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "img_job1", "status": "queued",
+			"poll_url": "http://" + r.Host + "/v1/images/generations/img_job1",
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewImageClientSolana(testSolanaKey(t), rpc.URL, WithImageAPIURL(server.URL))
+	if err != nil {
+		t.Fatalf("NewImageClientSolana: %v", err)
+	}
+	client.pollInterval = 10 * time.Millisecond
+
+	_, err = client.Generate(context.Background(), "slow", &ImageGenerateOptions{Model: "openai/gpt-image-2"})
+	if err == nil || !strings.Contains(err.Error(), "settled at submit") {
+		t.Fatalf("want a settled-at-submit failure, got %v", err)
+	}
+	if got := client.GetSpending().TotalUSD; got != 0.001 {
+		t.Errorf("expected $0.001 booked at submit, got %f", got)
 	}
 }
