@@ -82,6 +82,13 @@ type SmartChatOptions struct {
 //     256K ctx, explicit reasoning + vision). Table now matches the Python
 //     SDK's FREE_TIERS.
 //
+// Free tier, 2026-10-02: nvidia/deepseek-v4-flash, nvidia/llama-4-maverick and
+// nvidia/qwen3-coder-480b have left /v1/models. The gateway's MODEL_REDIRECTS
+// already answers all three with nvidia/nemotron-3-super-120b, so the table
+// names that target directly: same model served as before, and
+// SmartChatResponse.Model now names it instead of an id the catalog no longer
+// lists. TierReasoning (nemotron-3-nano-omni) is still listed and unchanged.
+//
 // Gemini 3.5 Flash promotion (2026-05-27): google/gemini-3.5-flash is the
 // latest-generation Flash with built-in thinking mode ($0.50 in / $3.00 out,
 // 1M context) and supersedes google/gemini-2.5-flash as the go-to Flash SKU.
@@ -94,8 +101,8 @@ type SmartChatOptions struct {
 // IDs remain available for clients pinned to their pricing.
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	RoutingFree: {
-		TierSimple: "nvidia/deepseek-v4-flash", TierMedium: "nvidia/llama-4-maverick",
-		TierComplex: "nvidia/qwen3-coder-480b", TierReasoning: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+		TierSimple: "nvidia/nemotron-3-super-120b", TierMedium: "nvidia/nemotron-3-super-120b",
+		TierComplex: "nvidia/nemotron-3-super-120b", TierReasoning: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
 	},
 	RoutingEco: {
 		TierSimple: "moonshot/kimi-k2.7", TierMedium: "deepseek/deepseek-chat",
