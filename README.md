@@ -1145,20 +1145,22 @@ for _, w := range wallets {
 
 ## Available Models
 
-| Provider | Models | Input $/M | Output $/M |
-|----------|--------|-----------|------------|
-| **OpenAI** | GPT-5.5, GPT-5.4, GPT-5.2, GPT-5.2 Codex, GPT-5 Mini, GPT-4o, GPT-4o-mini | $0.05–$30.00 | $0.40–$180.00 |
-| **Anthropic** | Claude Fable 5 (Mythos-class, 1M ctx, always-on thinking), Claude Opus 4.8, Claude Sonnet 4.6, Claude Haiku 4.5 | $1.00–$10.00 | $5.00–$50.00 |
-| **Google** | Gemini 3.5 Flash (thinking), Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash | $0.10–$2.00 | $0.40–$12.00 |
-| **xAI** | Grok 4.3 (1M, reasoning + vision), Grok Build 0.1 (256K, agentic coding) | $1.50 | $3.00–$4.00 |
-| **DeepSeek** | DeepSeek V4 Pro, DeepSeek Chat, DeepSeek Reasoner | $0.20–$0.435 | $0.40–$0.87 |
-| **ZAI** | GLM-5.1 ($1.40/$4.40), GLM-5 ($0.60/$1.92), GLM-5-Turbo ($1.20/$4.00) | $0.60–$1.40 | $1.92–$4.40 |
-| **ElevenLabs** | Flash v2.5, Turbo v2.5, Multilingual v2, v3 (TTS $0.05–0.10/1k chars), Sound Effects ($0.05/gen) | — | — |
-| **Moonshot** | Kimi K2.6 (256K, vision + reasoning) | $0.95 | $4.00 |
-| **Moonshot** | Kimi K2.5 (262K context, legacy) | $0.60 | $3.00 |
-| **NVIDIA** | DeepSeek V4 Pro/Flash, Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral (<!-- br:models.free -->6<!-- /br:models.free --> models) | **FREE** | **FREE** |
+Prices are not listed here — they change often. See
+[blockrun.ai/models](https://blockrun.ai/models) for live rates, or call
+`client.ListModels(ctx)`, which returns exactly what the gateway charges.
 
-Use `client.ListModels(ctx)` for the full list with current pricing.
+| Provider | Chat models |
+|----------|-------------|
+| **OpenAI** | GPT-6 Astra / Sol / Luna (1.05M ctx), GPT-5.6 Sol / Terra / Luna (+ Pro), GPT-5.5 (+ Pro), ChatGPT Instant, GPT-5.4 (+ Pro, Mini, Nano), GPT-5.2 (+ Pro), GPT-5.1, GPT-5.3 Codex, GPT-5 Mini, GPT-4.1 family, GPT-4o / 4o-mini, o1, o3, o3-mini, o4-mini |
+| **Anthropic** | Claude Fable 5.1, Fable 5, Opus 5.5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.5, Sonnet 5.5, Sonnet 5, Sonnet 4.6, Sonnet 4.5, Haiku 4.5 |
+| **Google** | Gemini 3.1 Pro, 3.8 Flash, 3.6 Flash, 3.5 Flash, 3 Flash Preview, 3.5 Flash Lite, 3.1 Flash Lite, 2.5 Pro, 2.5 Flash, 2.5 Flash Lite |
+| **xAI** | Grok 4.7, Grok 4.6, Grok 4.5 (500K ctx, Live Search), Grok 4.3 (1M), Grok Build 0.1 (agentic coding) |
+| **DeepSeek** | DeepSeek V4 Pro, V4 Flash Chat, V4 Flash Reasoner, V4 Flash Vision (experimental) |
+| **Moonshot / MiniMax / Z.ai / Qwen / Xiaomi** | Kimi K3; MiniMax M3, M2.7; GLM-5.3, 5.3 Flash, 5.2, 5.1, 5, 5 Turbo; Qwen3.7 Max / Plus / Flash, Qwen3.8 Flash; MiMo V2.5, V2.5 Pro |
+| **Free** (<!-- br:models.free -->6<!-- /br:models.free --> models, $0) | Nemotron 3.5 Lightning, Nemotron 3 Ultra 550B, Nemotron 3 Nano Omni, Llama 3.2 11B Vision, Cohere North Mini Code, Poolside Laguna XS 2.1 |
+| **ElevenLabs** (speech) | Flash v2.5, Turbo v2.5, Multilingual v2, v3 TTS; Sound Effects |
+
+Use `client.ListModels(ctx)` for the full list.
 
 ## Environment Variables
 
