@@ -10,7 +10,7 @@
 >
 > The module keeps the name `blockrun-llm-go` because in Go the repository name *is* the import path, and renaming it would break every existing consumer. The SDK stopped being LLM-only long before v0.19.
 >
-> 🆓 **Includes <!-- br:models.free -->6<!-- /br:models.free --> fully-free NVIDIA-hosted models** — DeepSeek V4 Pro/Flash (1M context), Nemotron Nano Omni (vision), Qwen3, Llama 4, GLM-4.7, Mistral. Zero USDC, no rate-limit gimmicks. Use `blockrun.RoutingFree` or call any `nvidia/*` model directly.
+> 🆓 **Includes <!-- br:models.free -->6<!-- /br:models.free --> fully-free models** — Nemotron 3 Ultra 550B and Nemotron 3.5 Lightning (1M context), Nemotron 3 Nano Omni (vision), Llama 3.2 11B Vision, Cohere North Mini Code, Poolside Laguna XS 2.1. Zero USDC. Use `blockrun.RoutingFree` or call any free model by ID.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/blockrunai/blockrun-llm-go.svg)](https://pkg.go.dev/github.com/blockrunai/blockrun-llm-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -75,33 +75,31 @@ credit account is enough:
 
 ```go
 // Option 1: call a free model directly
-reply, _ := client.Chat(ctx, "nvidia/deepseek-v4-flash", "Explain x402 in 1 sentence")
+reply, _ := client.Chat(ctx, "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "Explain x402 in 1 sentence")
 
 // Option 2: let the smart router pick the best free model per request
 result, _ := client.SmartChat(ctx, "What is 2+2?", &blockrun.SmartChatOptions{
     RoutingProfile: blockrun.RoutingFree,
 })
-fmt.Println(result.Model)    // e.g. "nvidia/deepseek-v4-flash"
+fmt.Println(result.Model)    // e.g. "nvidia/nemotron-3-super-120b"
 fmt.Println(result.Response) // "4"
 ```
 
-**Available free models** (input + output both $0, all NVIDIA-hosted, last refreshed 2026-06-07):
+**Available free models** (input + output both $0, from the live `/v1/models` catalog, 2026-10-02):
 
 | Model ID | Context | Best For |
 |----------|---------|----------|
-| `nvidia/deepseek-v4-flash` | 1M | DeepSeek V4 Flash — 284B / 13B active MoE, ~5× faster than V4 Pro. Best free chat / summarization / light reasoning |
-| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | 256K | Only vision-capable free model — text + images + video (≤2 min) + audio (≤1 hr) |
-| `nvidia/llama-4-maverick` | 131K | Meta Llama 4 Maverick MoE |
-| `nvidia/mistral-small-4-119b` | 131K | ⚠️ Upstream timing out as of 2026-06-07 — avoid until NVIDIA recovers it |
-| `nvidia/qwen3-coder-480b` | 131K | Coding-optimised 480B MoE |
-| `nvidia/gpt-oss-120b` | 128K | OpenAI open-weight 120B — 123 tok/s. Hidden from `/v1/models` for privacy but direct calls by full ID still work |
-| `nvidia/gpt-oss-20b` | 128K | OpenAI open-weight 20B — 155 tok/s. Hidden from `/v1/models` but direct calls still work |
+| `nvidia/nemotron-3-ultra-550b` | 1M | Largest free model — 550B / 55B active MoE reasoning |
+| `nvidia/nemotron-3.5-lightning` | 1M | Thinking-mode reasoning, long context |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | 256K | Multimodal reasoning — text, images, video, audio |
+| `nvidia/llama-3.2-11b-vision` | 128K | Meta Llama 3.2 vision |
+| `cohere/north-mini-code` | 256K | Compact coding model |
+| `poolside/laguna-xs-2.1` | 131K | Fast compact coding model |
 
-> Need V4-Pro-class reasoning? Use the paid `deepseek/deepseek-v4-pro` ($0.435/$0.87 — the 75% launch promo became the permanent list price after 2026-05-31) — `nvidia/deepseek-v4-pro` is currently hidden because NVIDIA's NIM deployment is hung; backend MODEL_REDIRECTS forwards calls to V4 Flash.
-
-> Note: `nvidia/gpt-oss-120b` and `nvidia/gpt-oss-20b` are hidden from `/v1/models` — NVIDIA's free build.nvidia.com tier reserves the right to use prompts/outputs for service improvement, so SmartChat never auto-routes to them. Direct calls by full ID still work; opt in only when your data isn't sensitive.
-
-> Retired: `nvidia/qwen3-next-80b-a3b-thinking` hit NVIDIA end-of-life 2026-05-21 (HTTP 410). The gateway auto-redirects pinned callers to `nvidia/llama-4-maverick`.
+> The free pool rotates as NVIDIA retires deployments. Retired free IDs keep
+> answering through gateway redirects, but `GET /v1/models` is the list to
+> trust. Under load the gateway's circuit breaker can reroute a free call to
+> another $0 model or refuse it with `FREE_MODEL_FAILED`.
 
 ## How Payment Works
 
@@ -501,9 +499,9 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 
 | Profile | Simple | Medium | Complex | Reasoning |
 |---------|--------|--------|---------|-----------|
-| **free** | nvidia/deepseek-v4-flash | nvidia/llama-4-maverick | nvidia/qwen3-coder-480b | nvidia/nemotron-3-nano-omni-30b-a3b-reasoning |
-| **eco** | moonshot/kimi-k2.6 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
-| **auto** | moonshot/kimi-k2.6 | google/gemini-3.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
+| **free** | nvidia/nemotron-3-super-120b | nvidia/nemotron-3-super-120b | nvidia/nemotron-3-super-120b | nvidia/nemotron-3-nano-omni-30b-a3b-reasoning |
+| **eco** | moonshot/kimi-k2.7 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
+| **auto** | moonshot/kimi-k2.7 | google/gemini-3.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
 | **premium** | google/gemini-3.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.8 | openai/o3 |
 
 > DeepSeek V4 family launched 2026-04-24. The legacy `deepseek/deepseek-chat`
@@ -515,21 +513,14 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 > `deepseek-reasoner` as the eco/auto reasoning primary because V4 Flash
 > thinking is cheaper.
 >
-> NVIDIA free routing rebuilt 2026-06-07 from a live sweep:
-> `nvidia/qwen3-next-80b-a3b-thinking` hit NVIDIA end-of-life 2026-05-21
-> (HTTP 410) and `nvidia/mistral-small-4-119b` is timing out upstream — both
-> dropped. Free now routes Simple → deepseek-v4-flash (1M context), Medium →
-> llama-4-maverick, Complex → qwen3-coder-480b, Reasoning →
-> nemotron-3-nano-omni (matches the Python SDK). `nvidia/gpt-oss-120b` /
-> `gpt-oss-20b` remain hidden for privacy (direct calls by full ID still
-> return HTTP 200). Retired IDs (`nvidia/nemotron-*`,
-> `nvidia/mistral-large-3-675b`, `nvidia/devstral-2-123b`,
-> `nvidia/qwen3.5-397b-a17b`, paid `nvidia/kimi-k2.5`) resolve via backend
-> redirects. `nvidia/deepseek-v4-pro`, `nvidia/deepseek-v3.2`, and
-> `nvidia/glm-4.7` are temporarily hidden (NVIDIA NIM hung) and
-> auto-redirect to `nvidia/deepseek-v4-flash` / `nvidia/qwen3-coder-480b`;
-> the Free routing primaries above point at visible IDs so `result.Model`
-> reflects the model that actually answered.
+> Free routing, 2026-10-02: `nvidia/deepseek-v4-flash`,
+> `nvidia/llama-4-maverick` and `nvidia/qwen3-coder-480b` left the gateway
+> catalog, and the gateway already answered all three with
+> `nvidia/nemotron-3-super-120b`. The free Simple / Medium / Complex tiers now
+> name that model directly, so `result.Model` matches what serves the call.
+> Reasoning stays on `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`. The free
+> pool is load-shed by a gateway circuit breaker, so a free call can still be
+> rerouted to another $0 model or refused with `FREE_MODEL_FAILED` under load.
 
 ## Streaming
 
