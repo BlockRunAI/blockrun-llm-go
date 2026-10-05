@@ -1,6 +1,6 @@
 # BlockRun Go SDK
 
-> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->82<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request — no subscription, no seats, no minimum.
+> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->86<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request — no subscription, no seats, no minimum.
 >
 > **Two ways to pay, same SDK, same catalogue.** Sign up at
 > **[user.blockrun.ai](https://user.blockrun.ai)** for an API key and prepaid
@@ -10,7 +10,7 @@
 >
 > The module keeps the name `blockrun-llm-go` because in Go the repository name *is* the import path, and renaming it would break every existing consumer. The SDK stopped being LLM-only long before v0.19.
 >
-> 🆓 **Includes <!-- br:models.free -->6<!-- /br:models.free --> fully-free models** — Nemotron 3 Ultra 550B and Nemotron 3.5 Lightning (1M context), Nemotron 3 Nano Omni (vision), Llama 3.2 11B Vision, Cohere North Mini Code, Poolside Laguna XS 2.1. Zero USDC. Use `blockrun.RoutingFree` or call any free model by ID.
+> 🆓 **Includes <!-- br:models.free -->7<!-- /br:models.free --> fully-free models** — Nemotron 3 Ultra 550B and Nemotron 3.5 Lightning (1M context), Nemotron 3 Nano Omni (vision), Llama 3.2 11B Vision, Cohere North Mini Code, Poolside Laguna XS 2.1. Zero USDC. Use `blockrun.RoutingFree` or call any free model by ID.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/blockrunai/blockrun-llm-go.svg)](https://pkg.go.dev/github.com/blockrunai/blockrun-llm-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -358,7 +358,7 @@ host you configured for a different rail.
 | Feature | Description |
 |---------|-------------|
 | **Two payment rails** | API key + prepaid credit (`user.blockrun.ai`), or x402 USDC from your own wallet on Solana / Base |
-| **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->82<!-- /br:models.chatVisible --> models |
+| **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->86<!-- /br:models.chatVisible --> models |
 | **Anthropic Client** | Native Anthropic Messages API with automatic x402 payments |
 | **Smart Routing** | Auto-selects the best model for your prompt |
 | **Streaming** | SSE streaming for real-time responses |
@@ -1148,7 +1148,7 @@ Prices are not listed here — they change often. See
 | **xAI** | Grok 4.7, Grok 4.6, Grok 4.5 (500K ctx, Live Search), Grok 4.3 (1M), Grok Build 0.1 (agentic coding) |
 | **DeepSeek** | DeepSeek V4 Pro, V4 Flash Chat, V4 Flash Reasoner, V4 Flash Vision (experimental) |
 | **Moonshot / MiniMax / Z.ai / Qwen / Xiaomi** | Kimi K3; MiniMax M3, M2.7; GLM-5.3, 5.3 Flash, 5.2, 5.1, 5, 5 Turbo; Qwen3.7 Max / Plus / Flash, Qwen3.8 Flash; MiMo V2.5, V2.5 Pro |
-| **Free** (<!-- br:models.free -->6<!-- /br:models.free --> models, $0) | Nemotron 3.5 Lightning, Nemotron 3 Ultra 550B, Nemotron 3 Nano Omni, Llama 3.2 11B Vision, Cohere North Mini Code, Poolside Laguna XS 2.1 |
+| **Free** (<!-- br:models.free -->7<!-- /br:models.free --> models, $0) | Nemotron 3.5 Lightning, Nemotron 3 Ultra 550B, Nemotron 3 Nano Omni, Llama 3.2 11B Vision, Cohere North Mini Code, Poolside Laguna XS 2.1 |
 | **ElevenLabs** (speech) | Flash v2.5, Turbo v2.5, Multilingual v2, v3 TTS; Sound Effects |
 
 Use `client.ListModels(ctx)` for the full list.
@@ -1219,7 +1219,7 @@ if err != nil {
 ## FAQ
 
 **What is blockrun-llm-go?**
-The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->82<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Pay with an API key and prepaid credit, or with x402 micropayments from your own wallet. No subscriptions either way. The `-llm-` in the name is history, not scope.
+The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->86<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Pay with an API key and prepaid credit, or with x402 micropayments from your own wallet. No subscriptions either way. The `-llm-` in the name is history, not scope.
 
 **Do I need a crypto wallet?**
 No. Sign up at [user.blockrun.ai](https://user.blockrun.ai), mint an API key, top up with a card, and `export BLOCKRUN_API_KEY=brk_live_…`. See [API Keys & Accounts](#api-keys--accounts-userblockrunai). A wallet is the other option, not a requirement.
@@ -1234,7 +1234,7 @@ No. Nothing changes unless you set `BLOCKRUN_API_KEY` — and passing a wallet k
 Yes, and Solana is the recommended chain: settlement is sub-second and BlockRun's facilitator pays the fee, so you hold no SOL. Every client has a `NewXClientSolana` counterpart — same API, same responses. See [Pay on Solana](#pay-on-solana). Base works identically and is still what the bare `NewLLMClient` constructor uses.
 
 **How much does it cost?**
-Pay only for what you use. <!-- br:models.free -->6<!-- /br:models.free --> NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 of credit or USDC gets you thousands of paid-model requests.
+Pay only for what you use. <!-- br:models.free -->7<!-- /br:models.free --> NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 of credit or USDC gets you thousands of paid-model requests.
 
 **Is streaming supported?**
 Yes. Use `ChatCompletionStream` for SSE streaming — on both rails.
