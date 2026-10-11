@@ -405,6 +405,22 @@ func (c *ImageClient) pollImageJob(
 	submitStatus int,
 	pay *imagePayment,
 ) (*ImageResponse, error) {
+	// Solana settled at submit, so the cost is booked before anything else can
+	// fail — decoding the 202, resolving poll_url, polling — and the job is
+	// polled with the wallet's ownership proof, never a payment.
+	if pay != nil && c.isSolana() {
+		body, header, note, err := c.followSolanaPaidSubmit(ctx, pollKindImage, "Image generation",
+			endpoint, submitBody, submitStatus, pay, imagePollBudget, c.pollInterval)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := decodeImageResponse(body, header)
+		if err != nil {
+			return nil, fmt.Errorf("%w. %s", err, note)
+		}
+		return resp, nil
+	}
+
 	var submitData struct {
 		ID      string `json:"id"`
 		PollURL string `json:"poll_url"`
@@ -423,26 +439,6 @@ func (c *ImageClient) pollImageJob(
 	pollURL, pollErr := c.resolvePollURL(submitData.PollURL)
 	if pollErr != nil {
 		return nil, pollErr
-	}
-
-	// Solana settled at submit, so the cost is booked before the first poll and
-	// the job is polled with the wallet's ownership proof, never a payment.
-	if pay != nil && c.isSolana() {
-		c.recordSettledCost(pay.option.Amount, endpoint)
-		body, header, err := c.pollSolanaPaidJob(ctx, &solanaPaidJob{
-			kind:     pollKindImage,
-			label:    "Image generation",
-			id:       submitData.ID,
-			pollURL:  pollURL,
-			status:   submitData.Status,
-			pay:      pay,
-			budget:   imagePollBudget,
-			interval: c.pollInterval,
-		})
-		if err != nil {
-			return nil, err
-		}
-		return decodeImageResponse(body, header)
 	}
 
 	deadline := time.Now().Add(imagePollBudget)

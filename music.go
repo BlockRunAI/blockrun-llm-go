@@ -190,6 +190,10 @@ func (c *MusicClient) Generate(ctx context.Context, prompt string, opts *MusicGe
 
 	var musicResp MusicResponse
 	if err := json.Unmarshal(respBytes, &musicResp); err != nil {
+		if c.isSolana() {
+			// sol settled at the POST: a retry would pay again.
+			return nil, fmt.Errorf("failed to decode response: %w. Payment was settled at submit; check your wallet before submitting again", err)
+		}
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 

@@ -143,9 +143,19 @@ func (bc *baseClient) pollSolanaPaidJob(ctx context.Context, job *solanaPaidJob)
 			}
 			continue
 		}
-		transportErrors = 0
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if readErr != nil {
+			// An answer cut off mid-body is as unknown as no answer.
+			transportErrors++
+			if transportErrors >= solanaMaxPollTransportErrors {
+				return nil, nil, fmt.Errorf("%s poll failed %d times in a row: %w. %s", job.label, transportErrors, readErr, job.paidNote())
+			}
+			continue
+		}
+		if resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+			transportErrors = 0
+		}
 
 		if proofPolls {
 			switch resp.StatusCode {
@@ -169,6 +179,21 @@ func (bc *baseClient) pollSolanaPaidJob(ctx context.Context, job *solanaPaidJob)
 		}
 
 		if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+			wait = pollRetryAfter(resp.Header, job.interval)
+			continue
+		}
+		// Any other 5xx, or a 429, is the gateway or its edge having a bad
+		// moment (the poll route answers 500 from its catch-all). A poll never
+		// charges, so ask again — bounded like a dropped request, because a
+		// persistent 500 is not going to turn into a track.
+		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+			transportErrors++
+			if transportErrors >= solanaMaxPollTransportErrors {
+				return nil, nil, &APIError{
+					StatusCode: resp.StatusCode,
+					Message:    fmt.Sprintf("Poll failed %d times in a row: %s. %s", transportErrors, strings.TrimSpace(string(body)), job.paidNote()),
+				}
+			}
 			wait = pollRetryAfter(resp.Header, job.interval)
 			continue
 		}
@@ -203,7 +228,9 @@ func (bc *baseClient) pollSolanaPaidJob(ctx context.Context, job *solanaPaidJob)
 	}
 }
 
-// pollRetryAfter reads a delta-seconds Retry-After, capped, else def.
+// pollRetryAfter reads a delta-seconds Retry-After, capped, else def. It never
+// returns less than def: a "Retry-After: 0" would otherwise skip the wait and
+// spin the loop against the gateway for the whole budget.
 func pollRetryAfter(h http.Header, def time.Duration) time.Duration {
 	raw := strings.TrimSpace(h.Get("Retry-After"))
 	if raw == "" {
@@ -216,6 +243,9 @@ func pollRetryAfter(h http.Header, def time.Duration) time.Duration {
 	d := time.Duration(n) * time.Second
 	if d > solanaMaxPollRetryAfter {
 		d = solanaMaxPollRetryAfter
+	}
+	if d < def {
+		d = def
 	}
 	return d
 }
@@ -294,8 +324,13 @@ func (bc *baseClient) solanaPaidMediaPost(
 		// only the answer lost. Say so: a blind retry could pay twice.
 		return nil, nil, fmt.Errorf("%s submit failed in transit after the payment was signed; it may have settled, so check your wallet before submitting again: %w", label, err)
 	}
-	body2, _ := io.ReadAll(resp2.Body)
+	body2, readErr := io.ReadAll(resp2.Body)
 	resp2.Body.Close()
+	if readErr != nil && (resp2.StatusCode == http.StatusOK || resp2.StatusCode == http.StatusAccepted) {
+		// Accepted means paid; only the answer was lost.
+		bc.recordSettledCost(paymentOption.Amount, endpoint)
+		return nil, nil, fmt.Errorf("%s was paid but its response was cut off: %w. Payment was settled at submit; check your wallet before submitting again", label, readErr)
+	}
 
 	switch resp2.StatusCode {
 	case http.StatusPaymentRequired:
@@ -304,8 +339,7 @@ func (bc *baseClient) solanaPaidMediaPost(
 		bc.recordSettledCost(paymentOption.Amount, endpoint)
 		return body2, resp2.Header, nil
 	case http.StatusAccepted:
-		// Paid and detached: book it now, then follow the job.
-		bc.recordSettledCost(paymentOption.Amount, endpoint)
+		// Paid and detached: followSolanaPaidSubmit books it, then follows it.
 	default:
 		return nil, nil, &APIError{
 			StatusCode: resp2.StatusCode,
@@ -313,36 +347,64 @@ func (bc *baseClient) solanaPaidMediaPost(
 		}
 	}
 
+	result, header, _, err := bc.followSolanaPaidSubmit(ctx, kind, label, endpoint, body2, resp2.StatusCode, &imagePayment{
+		option:      paymentOption,
+		payload:     paymentPayload,
+		resourceURL: resourceURL,
+		description: paymentReq.Resource.Description,
+		extensions:  paymentReq.Extensions,
+	}, budget, interval)
+	return result, header, err
+}
+
+// followSolanaPaidSubmit takes over a Solana submit that answered 202 after
+// the payment was accepted. It books the cost FIRST — the money moved when the
+// POST was accepted, so no later failure (an undecodable 202, a missing or
+// off-origin poll_url, a failed job, a timeout) may leave it unbooked — then
+// follows the job with pollSolanaPaidJob. Every error it returns says the
+// payment settled; the returned note is that wording, for the caller's own
+// post-processing errors.
+func (bc *baseClient) followSolanaPaidSubmit(
+	ctx context.Context,
+	kind, label, endpoint string,
+	submitBody []byte,
+	submitStatus int,
+	pay *imagePayment,
+	budget, interval time.Duration,
+) ([]byte, http.Header, string, error) {
+	bc.recordSettledCost(pay.option.Amount, endpoint)
+	if interval <= 0 {
+		interval = musicPollInterval
+	}
+
 	var submitted struct {
 		ID      string `json:"id"`
 		PollURL string `json:"poll_url"`
 		Status  string `json:"status"`
 	}
-	_ = json.Unmarshal(body2, &submitted)
+	_ = json.Unmarshal(submitBody, &submitted)
+	job := &solanaPaidJob{
+		kind:     kind,
+		label:    label,
+		id:       submitted.ID,
+		pollURL:  submitted.PollURL,
+		status:   submitted.Status,
+		pay:      pay,
+		budget:   budget,
+		interval: interval,
+	}
 	if submitted.ID == "" || submitted.PollURL == "" {
-		return nil, nil, &APIError{
-			StatusCode: resp2.StatusCode,
-			Message:    fmt.Sprintf("%s was paid but the submit response is missing id/poll_url: %s", label, string(body2)),
+		return nil, nil, job.paidNote(), &APIError{
+			StatusCode: submitStatus,
+			Message: fmt.Sprintf("%s was paid but the submit response is missing id/poll_url: %s. Payment was settled at submit; check your wallet before submitting again.",
+				label, strings.TrimSpace(string(submitBody))),
 		}
 	}
 	pollURL, err := bc.resolvePollURL(submitted.PollURL)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s was paid (job %s) but its poll_url is unusable: %w", label, submitted.ID, err)
+		return nil, nil, job.paidNote(), fmt.Errorf("%s was paid (job %s) but its poll_url is unusable: %w. Payment was settled at submit; do not submit again", label, submitted.ID, err)
 	}
-	return bc.pollSolanaPaidJob(ctx, &solanaPaidJob{
-		kind:    kind,
-		label:   label,
-		id:      submitted.ID,
-		pollURL: pollURL,
-		status:  submitted.Status,
-		pay: &imagePayment{
-			option:      paymentOption,
-			payload:     paymentPayload,
-			resourceURL: resourceURL,
-			description: paymentReq.Resource.Description,
-			extensions:  paymentReq.Extensions,
-		},
-		budget:   budget,
-		interval: interval,
-	})
+	job.pollURL = pollURL
+	body, header, err := bc.pollSolanaPaidJob(ctx, job)
+	return body, header, job.paidNote(), err
 }

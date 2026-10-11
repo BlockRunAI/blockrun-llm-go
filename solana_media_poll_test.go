@@ -81,6 +81,8 @@ func (g *solGateway) handler(w http.ResponseWriter, r *http.Request) {
 	poll := g.pollPath
 	if poll == "" {
 		poll = g.defaultPollPath()
+	} else if poll == "-" {
+		poll = ""
 	}
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -461,5 +463,172 @@ func TestPollJobID(t *testing.T) {
 	}
 	if got := pollAuthMessage("audio", "aud_1", 1760000000); got != "blockrun-poll:v1:audio:aud_1:1760000000" {
 		t.Errorf("pollAuthMessage = %q", got)
+	}
+}
+
+// --- Review findings (each goes red without its fix) ---
+
+// An image paid at the POST whose 202 cannot be followed (off-origin or
+// missing poll_url) used to return before the cost was booked, with no word
+// that it was paid — so GetSpending read $0 and a retry paid twice.
+func TestImageSolanaUnfollowable202IsBookedAndSaysPaid(t *testing.T) {
+	for name, poll := range map[string]string{
+		"off-origin": "https://attacker.example/api/v1/images/generations/img_x",
+		"missing":    "-",
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newSolGateway(t, "/api/v1/images/generations", "img_x")
+			g.pollPath = poll
+			if poll == "-" {
+				g.jobID = "" // 202 with no id
+			}
+			g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) { t.Errorf("no poll may be sent") }
+			apiURL, rpcURL := g.start()
+			c := newSolImageClient(t, apiURL, rpcURL)
+
+			_, err := c.Generate(context.Background(), "x", nil)
+			if err == nil || !strings.Contains(err.Error(), "settled at submit") {
+				t.Fatalf("want a paid error, got %v", err)
+			}
+			if s := c.GetSpending(); s.TotalUSD != 0.001 || s.Calls != 1 {
+				t.Errorf("spending = %+v, want $0.001 over 1 call", s)
+			}
+		})
+	}
+}
+
+// A 500, 502 or 429 on a free proof poll used to end a paid job on the spot.
+func TestSolanaProofPollRetriesServerErrors(t *testing.T) {
+	g := newSolGateway(t, "/api/v1/audio/generations", "aud_500")
+	codes := []int{http.StatusInternalServerError, http.StatusBadGateway, http.StatusTooManyRequests}
+	g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) {
+		if n <= len(codes) {
+			w.WriteHeader(codes[n-1])
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "Internal server error"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(completedMusicBody(g.jobID))
+	}
+	apiURL, rpcURL := g.start()
+	c := newSolMusicClient(t, apiURL, rpcURL)
+	if _, err := c.Generate(context.Background(), "x", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if n := len(g.pollRequests()); n != 4 {
+		t.Errorf("polls = %d, want 4", n)
+	}
+}
+
+// ...but a persistent one is bounded, and the error says the job was paid.
+func TestSolanaProofPollPersistentServerErrorIsBounded(t *testing.T) {
+	g := newSolGateway(t, "/api/v1/audio/generations", "aud_dead")
+	g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	apiURL, rpcURL := g.start()
+	c := newSolMusicClient(t, apiURL, rpcURL)
+	_, err := c.Generate(context.Background(), "x", nil)
+	if err == nil || !strings.Contains(err.Error(), "do not submit again") {
+		t.Fatalf("want a bounded, paid error, got %v", err)
+	}
+	if n := len(g.pollRequests()); n != solanaMaxPollTransportErrors {
+		t.Errorf("polls = %d, want %d", n, solanaMaxPollTransportErrors)
+	}
+}
+
+// "Retry-After: 0" used to skip the wait and spin the loop for the whole budget.
+func TestSolanaRetryAfterZeroDoesNotSpin(t *testing.T) {
+	g := newSolGateway(t, "/api/v1/audio/generations", "aud_spin")
+	g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": g.jobID, "status": "in_progress"})
+	}
+	apiURL, rpcURL := g.start()
+	c := newSolMusicClient(t, apiURL, rpcURL)
+	c.pollInterval = 20 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, _ = c.Generate(ctx, "x", nil)
+	if n := len(g.pollRequests()); n > 20 {
+		t.Errorf("polls = %d in 300ms at a 20ms interval: Retry-After: 0 spun the loop", n)
+	}
+}
+
+// A paid track whose body cannot be decoded, or is cut off, must say it was
+// paid; a retry would pay again.
+func TestMusicSolanaPaidButUnreadableSaysPaid(t *testing.T) {
+	for name, write := range map[string]func(w http.ResponseWriter){
+		"bad json": func(w http.ResponseWriter) { _, _ = w.Write([]byte("not json")) },
+		"cut off": func(w http.ResponseWriter) {
+			w.Header().Set("Content-Length", "1000")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":[`))
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("no hijacker")
+			}
+			conn, _, _ := hj.Hijack()
+			conn.Close()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newSolGateway(t, "/api/v1/audio/generations", "unused")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("PAYMENT-SIGNATURE") == "" {
+					w.Header().Set("payment-required", g.prHeader)
+					w.WriteHeader(http.StatusPaymentRequired)
+					return
+				}
+				write(w)
+			}))
+			t.Cleanup(srv.Close)
+			_, rpcURL := g.start()
+			c := newSolMusicClient(t, srv.URL+"/api", rpcURL)
+			_, err := c.Generate(context.Background(), "x", nil)
+			if err == nil || !strings.Contains(err.Error(), "settled at submit") {
+				t.Fatalf("want a paid error, got %v", err)
+			}
+			if got := c.GetSpending().TotalUSD; got != 0.001 {
+				t.Errorf("spending = %f, want 0.001", got)
+			}
+		})
+	}
+}
+
+// Image: a refused proof (404) falls back to pay-per-poll; a failed job says
+// it was paid; the fallback signs fresh each poll and books nothing more.
+func TestImageSolanaProofRefusedFallsBackAndFailedSaysPaid(t *testing.T) {
+	logs := captureLog(t)
+	g := newSolGateway(t, "/api/v1/images/generations", "img_old")
+	var sigs []string
+	g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) {
+		if r.Header.Get(pollHeaderSignature) != "" {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "Job not found"})
+			return
+		}
+		sigs = append(sigs, r.Header.Get("PAYMENT-SIGNATURE"))
+		if n < 3 {
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": g.jobID, "status": "in_progress"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": g.jobID, "status": "failed", "error": "boom"})
+	}
+	apiURL, rpcURL := g.start()
+	c := newSolImageClient(t, apiURL, rpcURL)
+	_, err := c.Generate(context.Background(), "x", nil)
+	if err == nil || !strings.Contains(err.Error(), "settled at submit") {
+		t.Fatalf("want a paid failure, got %v", err)
+	}
+	if len(sigs) != 2 || sigs[0] == "" || sigs[0] == sigs[1] {
+		t.Errorf("fallback polls must each carry a fresh payment; got %d signatures (distinct=%v)", len(sigs), len(sigs) == 2 && sigs[0] != sigs[1])
+	}
+	if n := strings.Count(logs.String(), "falling back to pay-per-poll"); n != 1 {
+		t.Errorf("fallback logged %d times, want once", n)
+	}
+	if s := c.GetSpending(); s.TotalUSD != 0.001 || s.Calls != 1 {
+		t.Errorf("spending = %+v, want $0.001 over 1 call", s)
 	}
 }
