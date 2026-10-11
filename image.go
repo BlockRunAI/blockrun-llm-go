@@ -246,8 +246,9 @@ func (c *ImageClient) Edit(ctx context.Context, prompt string, images []string, 
 // only on the first poll that observes status=completed, so an upstream failure
 // or a caller giving up costs nothing. On Solana it settles at submit — a signed
 // transaction dies with its ~60-90s blockhash, too soon to wait for a render —
-// so the 202 has already been charged. This client GET-polls poll_url with the
-// same wallet's PAYMENT-SIGNATURE until the job reaches a terminal state,
+// so the 202 has already been charged. This client GET-polls poll_url — with the
+// same wallet's PAYMENT-SIGNATURE on Base, with a signed ownership proof (no
+// payment) on Solana — until the job reaches a terminal state,
 // then returns the same ImageResponse shape as the fast path — callers never
 // see the async envelope.
 func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint string, body map[string]any) (*ImageResponse, error) {
@@ -393,7 +394,9 @@ type imagePayment struct {
 // On the Base wallet rail the gateway settles USDC on the first poll that
 // observes "completed", so the cost is recorded exactly there. On Solana it
 // settled at submit, so the cost is recorded before the first poll — a job that
-// then fails or times out was still charged. On the account rail the
+// then fails or times out was still charged — and the job is handed to
+// pollSolanaPaidJob, which polls with an ownership proof instead of a payment.
+// On the account rail the
 // completed payload carries its own price and recordAPIKeyCost books that.
 func (c *ImageClient) pollImageJob(
 	ctx context.Context,
@@ -402,6 +405,22 @@ func (c *ImageClient) pollImageJob(
 	submitStatus int,
 	pay *imagePayment,
 ) (*ImageResponse, error) {
+	// Solana settled at submit, so the cost is booked before anything else can
+	// fail — decoding the 202, resolving poll_url, polling — and the job is
+	// polled with the wallet's ownership proof, never a payment.
+	if pay != nil && c.isSolana() {
+		body, header, note, err := c.followSolanaPaidSubmit(ctx, pollKindImage, "Image generation",
+			endpoint, submitBody, submitStatus, pay, imagePollBudget, c.pollInterval)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := decodeImageResponse(body, header)
+		if err != nil {
+			return nil, fmt.Errorf("%w. %s", err, note)
+		}
+		return resp, nil
+	}
+
 	var submitData struct {
 		ID      string `json:"id"`
 		PollURL string `json:"poll_url"`
@@ -427,17 +446,12 @@ func (c *ImageClient) pollImageJob(
 	if lastStatus == "" {
 		lastStatus = "queued"
 	}
-	// Base reuses the submit signature across polls; Solana re-signs with a fresh
-	// blockhash once the current one nears expiry (see pollPaymentPayload).
+	// Base reuses the submit signature across polls.
 	var pollSig string
 	if pay != nil {
 		pollSig = pay.payload
 	}
 	lastSigned := time.Now()
-	settledAtSubmit := pay != nil && c.isSolana()
-	if settledAtSubmit {
-		c.recordSettledCost(pay.option.Amount, endpoint)
-	}
 
 	for time.Now().Before(deadline) {
 		select {
@@ -482,8 +496,6 @@ func (c *ImageClient) pollImageJob(
 			note := " (no payment was taken)"
 			if pay == nil {
 				note = ""
-			} else if settledAtSubmit {
-				note = " (payment was settled at submit)"
 			}
 			return nil, &APIError{
 				StatusCode: pollResp.StatusCode,
@@ -496,7 +508,6 @@ func (c *ImageClient) pollImageJob(
 		// as completion is observed, then decode.
 		if lastStatus == "completed" {
 			switch {
-			case settledAtSubmit: // recorded at submit
 			case pay != nil:
 				c.recordSettledCost(pay.option.Amount, endpoint)
 			default:
@@ -521,8 +532,6 @@ func (c *ImageClient) pollImageJob(
 	unpaid := " No payment was taken."
 	if pay == nil {
 		unpaid = ""
-	} else if settledAtSubmit {
-		unpaid = " Payment was settled at submit; the job stays claimable at its poll_url."
 	}
 	return nil, &APIError{
 		StatusCode: http.StatusGatewayTimeout,

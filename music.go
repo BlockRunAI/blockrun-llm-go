@@ -20,6 +20,12 @@ const (
 	// DefaultMusicTimeout is the default timeout for music generation
 	// (music gen takes 1-3 minutes).
 	DefaultMusicTimeout = 210 * time.Second
+
+	// musicPollInterval and musicPollBudget bound the Solana slow path: a track
+	// that is not done within the gateway's ~60s inline window answers 202
+	// { id, poll_url } and is polled to completion.
+	musicPollInterval = 3 * time.Second
+	musicPollBudget   = 300 * time.Second
 )
 
 // MusicClient is the BlockRun Music Generation client.
@@ -34,6 +40,9 @@ const (
 // The key NEVER leaves your machine - only signatures are transmitted.
 type MusicClient struct {
 	*baseClient
+	// pollInterval is the wait between polls of a Solana async track.
+	// Defaults to musicPollInterval; overridable (mainly for tests).
+	pollInterval time.Duration
 }
 
 // MusicClientOption configures a MusicClient.
@@ -70,7 +79,7 @@ func NewMusicClient(privateKey string, opts ...MusicClientOption) (*MusicClient,
 		return nil, err
 	}
 
-	client := &MusicClient{baseClient: bc}
+	client := &MusicClient{baseClient: bc, pollInterval: musicPollInterval}
 
 	for _, opt := range opts {
 		opt(client)
@@ -160,13 +169,32 @@ func (c *MusicClient) Generate(ctx context.Context, prompt string, opts *MusicGe
 		body["lyrics"] = lyrics
 	}
 
-	respBytes, err := c.doRequest(ctx, "/v1/audio/generations", body)
+	var respBytes []byte
+	var err error
+	paid := false
+	if c.isSolana() {
+		// sol.blockrun.ai settles at the POST and detaches a slow track to
+		// 202 { id, poll_url }. doRequest knows only 200, so it reported that
+		// paid 202 as an error and a retry paid twice. Follow the job instead.
+		interval := c.pollInterval
+		if interval <= 0 {
+			interval = musicPollInterval
+		}
+		respBytes, paid, err = c.solanaPaidMediaPost(ctx, "/v1/audio/generations", body,
+			pollKindAudio, "Music generation", musicPollBudget, interval)
+	} else {
+		respBytes, err = c.doRequest(ctx, "/v1/audio/generations", body)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	var musicResp MusicResponse
 	if err := json.Unmarshal(respBytes, &musicResp); err != nil {
+		if paid {
+			// sol settled at the POST: a retry would pay again.
+			return nil, fmt.Errorf("failed to decode response: %w. Payment was settled at submit; check your wallet before submitting again", err)
+		}
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
