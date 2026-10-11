@@ -28,6 +28,8 @@ type solGateway struct {
 	jobID    string // the job id, before percent-encoding
 	pollPath string // what the 202 advertises as poll_url ("" = default)
 	prHeader string
+	// serverBlockhash is the 402's extra.recentBlockhash (pinned to submit).
+	serverBlockhash string
 
 	mu         sync.Mutex
 	paidPOSTs  int
@@ -38,14 +40,15 @@ type solGateway struct {
 func newSolGateway(t *testing.T, route, jobID string) *solGateway {
 	t.Helper()
 	opt := testPaymentOption(USDCSolanaMainnet) // Amount 1000 = $0.001
-	opt.Extra["recentBlockhash"] = makeBlockhash(t).String()
+	bh := makeBlockhash(t).String()
+	opt.Extra["recentBlockhash"] = bh
 	pr := PaymentRequirement{
 		X402Version: 2,
 		Accepts:     []PaymentOption{*opt},
 		Resource:    ResourceInfo{URL: "https://sol.blockrun.ai" + route, Description: "media"},
 	}
 	prJSON, _ := json.Marshal(pr)
-	return &solGateway{t: t, route: route, jobID: jobID, prHeader: base64.StdEncoding.EncodeToString(prJSON)}
+	return &solGateway{t: t, route: route, jobID: jobID, prHeader: base64.StdEncoding.EncodeToString(prJSON), serverBlockhash: bh}
 }
 
 func (g *solGateway) defaultPollPath() string {
@@ -108,6 +111,21 @@ func (g *solGateway) pollRequests() []*http.Request {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return append([]*http.Request(nil), g.polls...)
+}
+
+// assertFreshPollPayment checks a fallback poll's payment is signed against a
+// blockhash fetched for the poll, not the submit-time one the 402 pinned (dead
+// within ~60-90s). Signature inequality alone proves nothing: every tx carries
+// a random memo nonce.
+func assertFreshPollPayment(t *testing.T, g *solGateway, payload string) {
+	t.Helper()
+	if payload == "" {
+		t.Fatal("fallback poll carried no PAYMENT-SIGNATURE")
+	}
+	tx := decodePaymentTx(t, payload)
+	if got := tx.Message.RecentBlockhash.String(); got == g.serverBlockhash {
+		t.Errorf("fallback poll re-used the submit-time blockhash %s", got)
+	}
 }
 
 // assertOwnershipProof checks a poll carries a valid proof for kind/jobID by
@@ -280,16 +298,11 @@ func TestMusicSolanaProofRefusedFallsBackToPayPerPoll(t *testing.T) {
 	if polls[0].Header.Get(pollHeaderSignature) == "" {
 		t.Errorf("first poll must try the ownership proof")
 	}
-	seen := map[string]bool{}
 	for _, p := range polls[1:] {
 		if p.Header.Get(pollHeaderSignature) != "" {
 			t.Errorf("after the refusal, no further proof may be sent")
 		}
-		sig := p.Header.Get("PAYMENT-SIGNATURE")
-		if seen[sig] {
-			t.Errorf("fallback reused a payment signature; each poll must sign fresh")
-		}
-		seen[sig] = true
+		assertFreshPollPayment(t, g, p.Header.Get("PAYMENT-SIGNATURE"))
 	}
 	if n := strings.Count(logs.String(), "falling back to pay-per-poll"); n != 1 {
 		t.Errorf("fallback logged %d times, want once: %q", n, logs.String())
@@ -601,14 +614,12 @@ func TestMusicSolanaPaidButUnreadableSaysPaid(t *testing.T) {
 func TestImageSolanaProofRefusedFallsBackAndFailedSaysPaid(t *testing.T) {
 	logs := captureLog(t)
 	g := newSolGateway(t, "/api/v1/images/generations", "img_old")
-	var sigs []string
 	g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) {
 		if r.Header.Get(pollHeaderSignature) != "" {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": "Job not found"})
 			return
 		}
-		sigs = append(sigs, r.Header.Get("PAYMENT-SIGNATURE"))
 		if n < 3 {
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": g.jobID, "status": "in_progress"})
@@ -622,13 +633,60 @@ func TestImageSolanaProofRefusedFallsBackAndFailedSaysPaid(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "settled at submit") {
 		t.Fatalf("want a paid failure, got %v", err)
 	}
-	if len(sigs) != 2 || sigs[0] == "" || sigs[0] == sigs[1] {
-		t.Errorf("fallback polls must each carry a fresh payment; got %d signatures (distinct=%v)", len(sigs), len(sigs) == 2 && sigs[0] != sigs[1])
+	polls := g.pollRequests()
+	if len(polls) != 3 {
+		t.Fatalf("polls = %d, want 3 (1 refused proof + 2 paid)", len(polls))
+	}
+	for _, p := range polls[1:] {
+		assertFreshPollPayment(t, g, p.Header.Get("PAYMENT-SIGNATURE"))
 	}
 	if n := strings.Count(logs.String(), "falling back to pay-per-poll"); n != 1 {
 		t.Errorf("fallback logged %d times, want once", n)
 	}
 	if s := c.GetSpending(); s.TotalUSD != 0.001 || s.Calls != 1 {
 		t.Errorf("spending = %+v, want $0.001 over 1 call", s)
+	}
+}
+
+// 500s spread across a long job, each followed by a 503 "not yet", must not
+// add up to the consecutive-failure cap and abandon a paid job.
+func TestSolanaInterleavedServerErrorsDoNotAccumulate(t *testing.T) {
+	g := newSolGateway(t, "/api/v1/audio/generations", "aud_mixed")
+	g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) {
+		if n <= 2*solanaMaxPollTransportErrors {
+			if n%2 == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+			} else {
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+			return
+		}
+		_ = json.NewEncoder(w).Encode(completedMusicBody(g.jobID))
+	}
+	apiURL, rpcURL := g.start()
+	c := newSolMusicClient(t, apiURL, rpcURL)
+	if _, err := c.Generate(context.Background(), "x", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
+// A free (unpaid) 200 on sol that cannot be decoded must not claim a payment.
+func TestMusicSolanaFreeAnswerDoesNotClaimPayment(t *testing.T) {
+	g := newSolGateway(t, "/api/v1/audio/generations", "unused")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("not json"))
+	}))
+	t.Cleanup(srv.Close)
+	_, rpcURL := g.start()
+	c := newSolMusicClient(t, srv.URL+"/api", rpcURL)
+	_, err := c.Generate(context.Background(), "x", nil)
+	if err == nil {
+		t.Fatal("want a decode error")
+	}
+	if strings.Contains(err.Error(), "settled") {
+		t.Errorf("an unpaid answer must not claim a settlement: %v", err)
+	}
+	if got := c.GetSpending().TotalUSD; got != 0 {
+		t.Errorf("spending = %f, want 0", got)
 	}
 }

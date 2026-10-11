@@ -153,7 +153,10 @@ func (bc *baseClient) pollSolanaPaidJob(ctx context.Context, job *solanaPaidJob)
 			}
 			continue
 		}
-		if resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+		// Any answer other than a counted failure (below) ends the streak —
+		// including a 503/504 "not yet", so failures spread across a long job
+		// do not add up to an abandoned paid job.
+		if !isCountedPollFailure(resp.StatusCode) {
 			transportErrors = 0
 		}
 
@@ -186,7 +189,7 @@ func (bc *baseClient) pollSolanaPaidJob(ctx context.Context, job *solanaPaidJob)
 		// moment (the poll route answers 500 from its catch-all). A poll never
 		// charges, so ask again — bounded like a dropped request, because a
 		// persistent 500 is not going to turn into a track.
-		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+		if isCountedPollFailure(resp.StatusCode) {
 			transportErrors++
 			if transportErrors >= solanaMaxPollTransportErrors {
 				return nil, nil, &APIError{
@@ -228,6 +231,15 @@ func (bc *baseClient) pollSolanaPaidJob(ctx context.Context, job *solanaPaidJob)
 	}
 }
 
+// isCountedPollFailure is a poll answer that is retried but counts toward
+// solanaMaxPollTransportErrors: a 5xx other than 503/504 ("not yet"), or 429.
+func isCountedPollFailure(status int) bool {
+	if status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout {
+		return false
+	}
+	return status >= 500 || status == http.StatusTooManyRequests
+}
+
 // pollRetryAfter reads a delta-seconds Retry-After, capped, else def. It never
 // returns less than def: a "Retry-After: 0" would otherwise skip the wait and
 // spin the loop against the gateway for the whole budget.
@@ -262,46 +274,46 @@ func (bc *baseClient) solanaPaidMediaPost(
 	body map[string]any,
 	kind, label string,
 	budget, interval time.Duration,
-) ([]byte, http.Header, error) {
+) (respBody []byte, paid bool, err error) {
 	submitURL := bc.apiURL + endpoint
-	jsonBody, err := json.Marshal(body)
+	jsonBody, mErr := json.Marshal(body)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to encode request body: %w", err)
+		return nil, false, fmt.Errorf("failed to encode request body: %w", mErr)
 	}
 
 	req1, err := http.NewRequestWithContext(ctx, http.MethodPost, submitURL, bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, false, fmt.Errorf("failed to create request: %w", err)
 	}
 	req1.Header.Set("Content-Type", "application/json")
 	resp1, err := bc.httpClient.Do(req1)
 	if err != nil {
-		return nil, nil, fmt.Errorf("request failed: %w", err)
+		return nil, false, fmt.Errorf("request failed: %w", err)
 	}
 	body1, _ := io.ReadAll(resp1.Body)
 	resp1.Body.Close()
 
 	if resp1.StatusCode == http.StatusOK {
 		// Answered without a payment (free/proxy): nothing was charged.
-		return body1, resp1.Header, nil
+		return body1, false, nil
 	}
 	if resp1.StatusCode != http.StatusPaymentRequired {
-		return nil, nil, &APIError{
+		return nil, false, &APIError{
 			StatusCode: resp1.StatusCode,
 			Message:    fmt.Sprintf("API error: %s", string(body1)),
 		}
 	}
 	paymentHeader := paymentRequirementsFrom(resp1.Header.Get("payment-required"), body1)
 	if paymentHeader == "" {
-		return nil, nil, &PaymentError{Message: "402 response but no payment requirements found"}
+		return nil, false, &PaymentError{Message: "402 response but no payment requirements found"}
 	}
 	paymentReq, err := ParsePaymentRequired(paymentHeader)
 	if err != nil {
-		return nil, nil, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
+		return nil, false, &PaymentError{Message: fmt.Sprintf("Failed to parse payment requirements: %v", err)}
 	}
 	paymentOption, err := bc.extractPaymentDetails(paymentReq)
 	if err != nil {
-		return nil, nil, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
+		return nil, false, &PaymentError{Message: fmt.Sprintf("Failed to extract payment details: %v", err)}
 	}
 	resourceURL := paymentReq.Resource.URL
 	if resourceURL == "" {
@@ -309,12 +321,12 @@ func (bc *baseClient) solanaPaidMediaPost(
 	}
 	paymentPayload, err := bc.createPaymentPayload(paymentOption, resourceURL, paymentReq.Resource.Description, paymentReq.Extensions)
 	if err != nil {
-		return nil, nil, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
+		return nil, false, &PaymentError{Message: fmt.Sprintf("Failed to create payment: %v", err)}
 	}
 
 	req2, err := http.NewRequestWithContext(ctx, http.MethodPost, submitURL, bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create submit request: %w", err)
+		return nil, false, fmt.Errorf("failed to create submit request: %w", err)
 	}
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set("PAYMENT-SIGNATURE", paymentPayload)
@@ -322,39 +334,39 @@ func (bc *baseClient) solanaPaidMediaPost(
 	if err != nil {
 		// The signed transfer may have reached the gateway and settled with
 		// only the answer lost. Say so: a blind retry could pay twice.
-		return nil, nil, fmt.Errorf("%s submit failed in transit after the payment was signed; it may have settled, so check your wallet before submitting again: %w", label, err)
+		return nil, false, fmt.Errorf("%s submit failed in transit after the payment was signed; it may have settled, so check your wallet before submitting again: %w", label, err)
 	}
 	body2, readErr := io.ReadAll(resp2.Body)
 	resp2.Body.Close()
 	if readErr != nil && (resp2.StatusCode == http.StatusOK || resp2.StatusCode == http.StatusAccepted) {
 		// Accepted means paid; only the answer was lost.
 		bc.recordSettledCost(paymentOption.Amount, endpoint)
-		return nil, nil, fmt.Errorf("%s was paid but its response was cut off: %w. Payment was settled at submit; check your wallet before submitting again", label, readErr)
+		return nil, true, fmt.Errorf("%s was paid but its response was cut off: %w. Payment was settled at submit; check your wallet before submitting again", label, readErr)
 	}
 
 	switch resp2.StatusCode {
 	case http.StatusPaymentRequired:
-		return nil, nil, &PaymentError{Message: "Payment was rejected. Check your wallet balance."}
+		return nil, false, &PaymentError{Message: "Payment was rejected. Check your wallet balance."}
 	case http.StatusOK:
 		bc.recordSettledCost(paymentOption.Amount, endpoint)
-		return body2, resp2.Header, nil
+		return body2, true, nil
 	case http.StatusAccepted:
 		// Paid and detached: followSolanaPaidSubmit books it, then follows it.
 	default:
-		return nil, nil, &APIError{
+		return nil, false, &APIError{
 			StatusCode: resp2.StatusCode,
 			Message:    fmt.Sprintf("API error after payment: %s", string(body2)),
 		}
 	}
 
-	result, header, _, err := bc.followSolanaPaidSubmit(ctx, kind, label, endpoint, body2, resp2.StatusCode, &imagePayment{
+	result, _, _, err := bc.followSolanaPaidSubmit(ctx, kind, label, endpoint, body2, resp2.StatusCode, &imagePayment{
 		option:      paymentOption,
 		payload:     paymentPayload,
 		resourceURL: resourceURL,
 		description: paymentReq.Resource.Description,
 		extensions:  paymentReq.Extensions,
 	}, budget, interval)
-	return result, header, err
+	return result, true, err
 }
 
 // followSolanaPaidSubmit takes over a Solana submit that answered 202 after

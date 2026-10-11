@@ -171,6 +171,7 @@ func (c *MusicClient) Generate(ctx context.Context, prompt string, opts *MusicGe
 
 	var respBytes []byte
 	var err error
+	paid := false
 	if c.isSolana() {
 		// sol.blockrun.ai settles at the POST and detaches a slow track to
 		// 202 { id, poll_url }. doRequest knows only 200, so it reported that
@@ -179,7 +180,7 @@ func (c *MusicClient) Generate(ctx context.Context, prompt string, opts *MusicGe
 		if interval <= 0 {
 			interval = musicPollInterval
 		}
-		respBytes, _, err = c.solanaPaidMediaPost(ctx, "/v1/audio/generations", body,
+		respBytes, paid, err = c.solanaPaidMediaPost(ctx, "/v1/audio/generations", body,
 			pollKindAudio, "Music generation", musicPollBudget, interval)
 	} else {
 		respBytes, err = c.doRequest(ctx, "/v1/audio/generations", body)
@@ -190,7 +191,7 @@ func (c *MusicClient) Generate(ctx context.Context, prompt string, opts *MusicGe
 
 	var musicResp MusicResponse
 	if err := json.Unmarshal(respBytes, &musicResp); err != nil {
-		if c.isSolana() {
+		if paid {
 			// sol settled at the POST: a retry would pay again.
 			return nil, fmt.Errorf("failed to decode response: %w. Payment was settled at submit; check your wallet before submitting again", err)
 		}
