@@ -86,7 +86,7 @@ func NewMusicClientSolana(privateKey, rpcURL string, opts ...MusicClientOption) 
 	if err != nil {
 		return nil, err
 	}
-	client := &MusicClient{baseClient: bc}
+	client := &MusicClient{baseClient: bc, pollInterval: musicPollInterval}
 	for _, opt := range opts {
 		opt(client)
 	}
