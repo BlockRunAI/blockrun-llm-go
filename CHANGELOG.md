@@ -2,6 +2,21 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.22.0
+
+- **fix(solana): music and image polls sign a wallet ownership proof, not a payment.**
+  A slow Solana music track answered 202 + `poll_url` after the POST had already
+  settled, and `MusicClient` returned "API error after payment": a caller who
+  retried paid twice. It now follows the job to completed/failed. A slow Solana
+  image job was polled by signing a fresh payment every poll. Both now poll
+  with `x-poll-wallet` / `x-poll-timestamp` / `x-poll-signature` (base58
+  ed25519 over `blockrun-poll:v1:<audio|image>:<job id>:<unix seconds>`), never
+  paying on a poll; the cost is booked once from the POST. A gateway that
+  refuses the proof falls back to pay-per-poll for that job. Transient 5xx/429
+  on a poll are retried instead of abandoning a paid job. Base and the account
+  rail are unchanged. Live-verified on sol.blockrun.ai 2026-10-11: two 80s+
+  tracks, one settlement each.
+
 ## 0.21.2
 
 - **fix(solana): images settle at POST, and `ImageClient` now accounts for it.**
