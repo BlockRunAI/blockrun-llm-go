@@ -2,6 +2,15 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.22.1
+
+- **fix(solana): `MusicResponse.TxHash` is filled for every Solana track.**
+  A slow track's 202 is sent before the POST's settle lands, so `TxHash` was
+  always empty there. sol.blockrun.ai now reports the settlement as
+  `payment.tx_hash` on the completed poll and on the inline response
+  (blockrun-sol #439); the SDK reads it. Against a gateway that does not send
+  it, `TxHash` stays empty as before.
+
 ## 0.22.0
 
 - **fix(solana): music and image polls sign a wallet ownership proof, not a payment.**
