@@ -244,6 +244,26 @@ func TestMusicSolana202PollsWithOwnershipProof(t *testing.T) {
 	}
 }
 
+// The completed poll carries the POST's settlement as payment.tx_hash; the
+// response must surface it (it was always empty on the slow path).
+func TestMusicSolana202SurfacesPollTxHash(t *testing.T) {
+	g := newSolGateway(t, "/api/v1/audio/generations", "aud-tx")
+	g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) {
+		body := completedMusicBody(g.jobID)
+		body["payment"] = map[string]any{"status": "settled_at_post", "network": "solana", "tx_hash": "5txAudio"}
+		_ = json.NewEncoder(w).Encode(body)
+	}
+	apiURL, rpcURL := g.start()
+	c := newSolMusicClient(t, apiURL, rpcURL)
+	resp, err := c.Generate(context.Background(), "lofi beat", nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.TxHash != "5txAudio" {
+		t.Fatalf("TxHash = %q, want the poll's payment.tx_hash", resp.TxHash)
+	}
+}
+
 // A paid track that fails upstream after the 202 was still charged: the cost
 // stays booked and the error must say so instead of inviting a free retry.
 func TestMusicSolanaFailedAfter202IsChargedAndSaysSo(t *testing.T) {

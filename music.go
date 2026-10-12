@@ -197,6 +197,19 @@ func (c *MusicClient) Generate(ctx context.Context, prompt string, opts *MusicGe
 		}
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
+	if musicResp.TxHash == "" {
+		// A slow Solana track's completed poll reports the POST's settlement as
+		// payment.tx_hash (the 202 is sent before the settle lands, so it has
+		// none). Absent until the gateway has recorded it.
+		var receipt struct {
+			Payment struct {
+				TxHash string `json:"tx_hash"`
+			} `json:"payment"`
+		}
+		if json.Unmarshal(respBytes, &receipt) == nil {
+			musicResp.TxHash = receipt.Payment.TxHash
+		}
+	}
 
 	return &musicResp, nil
 }
