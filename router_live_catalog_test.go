@@ -9,10 +9,10 @@ import (
 )
 
 // TestRoutingTableMatchesLiveCatalog holds every routed id to the live
-// gateway catalog: listed, not available:false, and for the free profile
-// billed as free. "available" is the gateway's live health flag, so an
-// available:false failure can be a transient circuit-breaker trip; refetch
-// before retargeting. Opt-in because it needs network:
+// gateway catalog: listed, and for the free profile billed as free. A routed
+// id the catalog marks available:false is only logged: that flag is the
+// gateway's per-instance free-health breaker, which the gateway routes around
+// itself. Opt-in because it needs network:
 //
 //	BLOCKRUN_LIVE_CATALOG=1 go test -run TestRoutingTableMatchesLiveCatalog
 func TestRoutingTableMatchesLiveCatalog(t *testing.T) {
@@ -56,10 +56,10 @@ func TestRoutingTableMatchesLiveCatalog(t *testing.T) {
 			switch {
 			case !ok:
 				t.Errorf("%s/%s routes to %s, which /v1/models does not list", profile, tier, model)
-			case !e.available:
-				t.Errorf("%s/%s routes to %s, which /v1/models marks available:false", profile, tier, model)
 			case profile == RoutingFree && e.billing != "free":
 				t.Errorf("free/%s routes to %s, billed %q", tier, model, e.billing)
+			case !e.available:
+				t.Logf("%s/%s routes to %s, whose free-health breaker is open on this instance (transient; the gateway reroutes)", profile, tier, model)
 			}
 		}
 	}

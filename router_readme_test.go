@@ -6,22 +6,20 @@ import (
 	"testing"
 )
 
-// retiredRoutingIDs are ids the gateway has dropped from /v1/models, hidden,
-// or lists with available:false. Each is answered by a redirect to another
-// model, so routing to one makes SmartChatResponse.Model name a model that
-// never served the call. TestRoutingTableMatchesLiveCatalog
+// retiredRoutingIDs are ids the gateway has dropped from /v1/models or hides
+// (hidden:true). Each is answered by a redirect to another model, so routing
+// to one makes SmartChatResponse.Model name a model that never served the
+// call. available:false is a transient health-breaker state, not retirement,
+// so ids carrying it do not belong here. TestRoutingTableMatchesLiveCatalog
 // (BLOCKRUN_LIVE_CATALOG=1) checks the table against the live catalog itself.
 var retiredRoutingIDs = []string{
 	"nvidia/deepseek-v4-flash",
 	"nvidia/llama-4-maverick",
 	"nvidia/qwen3-coder-480b",
-	"nvidia/nemotron-3-super-120b",                  // left /v1/models; redirected 2026-10
-	"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", // available:false 2026-10
-	"nvidia/nemotron-3.5-lightning",                 // available:false 2026-10
-	"nvidia/nemotron-3-ultra-550b",                  // available:false 2026-10
-	"moonshot/kimi-k2.5",                            // hidden
-	"moonshot/kimi-k2.6",                            // hidden
-	"moonshot/kimi-k2.7",                            // hidden
+	"nvidia/nemotron-3-super-120b", // hidden:true; gateway-internal cascade rung
+	"moonshot/kimi-k2.5",           // hidden
+	"moonshot/kimi-k2.6",           // hidden
+	"moonshot/kimi-k2.7",           // hidden
 }
 
 func TestRoutingTableAvoidsRetiredIDs(t *testing.T) {

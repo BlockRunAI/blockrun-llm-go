@@ -16,6 +16,14 @@ All notable changes to blockrun-llm-go will be documented in this file.
   (router-core's eco/auto SIMPLE choices). A retired-id test covers every
   profile, and `BLOCKRUN_LIVE_CATALOG=1 go test` checks the table against the
   live catalog.
+- **fix(router): the free profile follows the gateway's free cascade instead of
+  pinning `nvidia/llama-3.2-11b-vision`.** `available: false` in `/v1/models` is
+  the gateway's transient free-health breaker, not a delisting, and the gateway
+  already reroutes a breaker-open free model. The free tiers now use the Python
+  SDK's free table: Simple `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`,
+  Medium/Complex/Reasoning `nvidia/nemotron-3.5-lightning`. The gateway's
+  ladder ends at `llama-3.2-11b-vision`. Hidden ids
+  (`nemotron-3-super-120b`, `kimi-k2.x`) stay out.
 
 ## 0.22.1
 

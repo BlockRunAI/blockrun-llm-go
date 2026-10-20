@@ -99,23 +99,34 @@ type SmartChatOptions struct {
 // premium/COMPLEX flagship, replacing anthropic/claude-opus-4.5. Opus 4.8 is
 // Anthropic's most capable model with a 1M-token context window. Older Opus
 // IDs remain available for clients pinned to their pricing.
-// Live-catalog sweep, 2026-10-20 (GET /v1/models + a $0 probe of each free id):
-//   - nvidia/nemotron-3-super-120b is no longer listed; the gateway answers it
-//     with nvidia/llama-3.2-11b-vision, so the free table was naming a model
-//     that never served the call.
-//   - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning (and every other free id
-//     except llama-3.2-11b-vision) is listed with available:false and is
-//     redirected too. nvidia/llama-3.2-11b-vision is the only free model the
-//     catalog marks available on every fetch (the flag is a live health
-//     signal; laguna-xs-2.1 flapped), so all four free tiers route to it.
-//   - moonshot/kimi-k2.7 is hidden from /v1/models. Eco/SIMPLE takes
-//     google/gemini-2.5-flash-lite ($0.10/$0.40) and Auto/SIMPLE takes
-//     google/gemini-2.5-flash ($0.30/$2.50), matching router-core's eco
-//     SIMPLE first live rung and auto SIMPLE primary.
+// Live-catalog sweep, 2026-10-20: moonshot/kimi-k2.7 is hidden from
+// /v1/models. Eco/SIMPLE takes google/gemini-2.5-flash-lite ($0.10/$0.40) and
+// Auto/SIMPLE takes google/gemini-2.5-flash ($0.30/$2.50), matching
+// router-core's eco SIMPLE first live rung and auto SIMPLE primary.
+//
+// Free tier, 2026-10-20: follows the sibling SDKs' free table (blockrun-llm
+// router_adapter.py FREE_TIERS; router-core has no free profile) instead of
+// pinning one model. nvidia/nemotron-3-super-120b stays out: it is hidden:true
+// in the gateway (models.ts), so /v1/models does not list it.
+//
+// A free model listed with available:false is NOT delisted. That flag is the
+// gateway's per-instance free-health circuit breaker (/v1/models reports
+// isFreeModelUsable), so it flaps between instances and recovers on its own.
+// SmartChat has no client-side fallback and does not need one: the gateway
+// already routes around a breaker-open free model. Before dispatch it reroutes
+// a requested free model whose breaker is open to the first usable,
+// capability-compatible rung of its rescue ladder (chat/completions/route.ts,
+// pickFreeRescue over FREE_RESCUE_LADDER), and if the call itself fails it
+// cascades nemotron-3-super-120b -> nemotron-3-nano-omni-30b-a3b-reasoning ->
+// llama-3.2-11b-vision within a 90s budget. A client retry on top of that
+// would only stack waits. So each tier names the sibling SDKs' primary, and
+// the gateway's ladder supplies the fallbacks, ending at llama-3.2-11b-vision.
+// When the gateway reroutes, SmartChatResponse.Model still names the
+// requested primary, not the model that served the call.
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	RoutingFree: {
-		TierSimple: "nvidia/llama-3.2-11b-vision", TierMedium: "nvidia/llama-3.2-11b-vision",
-		TierComplex: "nvidia/llama-3.2-11b-vision", TierReasoning: "nvidia/llama-3.2-11b-vision",
+		TierSimple: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", TierMedium: "nvidia/nemotron-3.5-lightning",
+		TierComplex: "nvidia/nemotron-3.5-lightning", TierReasoning: "nvidia/nemotron-3.5-lightning",
 	},
 	RoutingEco: {
 		TierSimple: "google/gemini-2.5-flash-lite", TierMedium: "deepseek/deepseek-chat",
