@@ -106,7 +106,8 @@ type SmartChatOptions struct {
 //   - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning (and every other free id
 //     except llama-3.2-11b-vision) is listed with available:false and is
 //     redirected too. nvidia/llama-3.2-11b-vision is the only free model the
-//     catalog marks available, so all four free tiers route to it.
+//     catalog marks available on every fetch (the flag is a live health
+//     signal; laguna-xs-2.1 flapped), so all four free tiers route to it.
 //   - moonshot/kimi-k2.7 is hidden from /v1/models. Eco/SIMPLE takes
 //     google/gemini-2.5-flash-lite ($0.10/$0.40) and Auto/SIMPLE takes
 //     google/gemini-2.5-flash ($0.30/$2.50), matching router-core's eco

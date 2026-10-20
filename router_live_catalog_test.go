@@ -10,7 +10,9 @@ import (
 
 // TestRoutingTableMatchesLiveCatalog holds every routed id to the live
 // gateway catalog: listed, not available:false, and for the free profile
-// billed as free. Opt-in because it needs network:
+// billed as free. "available" is the gateway's live health flag, so an
+// available:false failure can be a transient circuit-breaker trip; refetch
+// before retargeting. Opt-in because it needs network:
 //
 //	BLOCKRUN_LIVE_CATALOG=1 go test -run TestRoutingTableMatchesLiveCatalog
 func TestRoutingTableMatchesLiveCatalog(t *testing.T) {
