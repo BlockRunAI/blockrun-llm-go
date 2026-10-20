@@ -82,11 +82,13 @@ type SmartChatOptions struct {
 // serves them for clients pinned to their pricing, but the SmartChat default
 // now points at k2.7.
 //
-// DeepSeek V4 family (2026-04-24, paid catalog): deepseek/deepseek-chat and
-// deepseek/deepseek-reasoner are now V4 Flash chat / thinking modes
-// ($0.20 in / $0.40 out per 1M, 1M context). deepseek/deepseek-v4-pro is
-// the flagship paid SKU ($0.435 in / $0.87 out — the 75% launch promo
-// became DeepSeek's permanent list price after 2026-05-31).
+// DeepSeek (catalog 2026-10-20): deepseek/deepseek-chat and
+// deepseek/deepseek-reasoner are compatibility ids for DeepSeek V4.1 Flash.
+// deepseek-chat is the same model as the canonical deepseek/deepseek-v4.1-flash
+// (non-thinking), and deepseek-reasoner is that model with thinking on. Both
+// cost $0.14/$0.28 with a 1M context. The table keeps the compatibility ids,
+// matching router-core's chains; the reasoner has no canonical thinking-mode
+// id. deepseek/deepseek-v4-pro ($1.32/$3.96) is the flagship.
 //
 // NVIDIA free-tier refresh (2026-06-07 live sweep, every visible free model
 // probed):
