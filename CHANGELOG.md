@@ -4,6 +4,14 @@ All notable changes to blockrun-llm-go will be documented in this file.
 
 ## Unreleased
 
+- **fix(router): `SmartChatResponse.Model` names the model that answered.**
+  When the gateway reroutes a call (a free model whose health breaker is open,
+  or a free-cascade fallback), `Model` used to report the requested id. It is
+  now read from the response body's `model`, else the `X-Served-Model` /
+  `X-Fallback-Model` header, else the requested id. New
+  `SmartChatResponse.RequestedModel` (`json:"requested_model"`) keeps the
+  router's pick, as `Routing.Model` already did. Additive; no field changed
+  name or type.
 - **fix(router): SmartChat no longer routes to ids the gateway does not serve.**
   The free profile named `nvidia/nemotron-3-super-120b` (gone from
   `/v1/models`) and `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`

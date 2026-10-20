@@ -3,6 +3,7 @@ package blockrun
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 )
@@ -37,10 +38,32 @@ type RoutingDecision struct {
 }
 
 // SmartChatResponse wraps the chat response with routing metadata.
+//
+// Model is the model that actually answered. The gateway can serve a
+// different model than the one requested (a free model whose health breaker
+// is open is rerouted along the free ladder), so Model is read from the
+// response: the body's "model" field, else the X-Served-Model or
+// X-Fallback-Model header, else the requested id. RequestedModel (and
+// Routing.Model) is the id the router chose and sent.
 type SmartChatResponse struct {
-	Response string          `json:"response"`
-	Model    string          `json:"model"`
-	Routing  RoutingDecision `json:"routing"`
+	Response       string          `json:"response"`
+	Model          string          `json:"model"`
+	RequestedModel string          `json:"requested_model"`
+	Routing        RoutingDecision `json:"routing"`
+}
+
+// servedModel names the model that answered a chat call: the response body's
+// model field, then the gateway's reroute headers, then the requested id.
+func servedModel(requested string, resp *ChatResponse, headers http.Header) string {
+	if resp != nil && resp.Model != "" {
+		return resp.Model
+	}
+	for _, h := range []string{"X-Served-Model", "X-Fallback-Model"} {
+		if v := headers.Get(h); v != "" {
+			return v
+		}
+	}
+	return requested
 }
 
 // SmartChatOptions configures a SmartChat request.
@@ -121,8 +144,8 @@ type SmartChatOptions struct {
 // llama-3.2-11b-vision within a 90s budget. A client retry on top of that
 // would only stack waits. So each tier names the sibling SDKs' primary, and
 // the gateway's ladder supplies the fallbacks, ending at llama-3.2-11b-vision.
-// When the gateway reroutes, SmartChatResponse.Model still names the
-// requested primary, not the model that served the call.
+// When the gateway reroutes, SmartChatResponse.Model reports the model that
+// served the call (see servedModel) and RequestedModel keeps the primary.
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	RoutingFree: {
 		TierSimple: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", TierMedium: "nvidia/nemotron-3.5-lightning",
@@ -276,19 +299,25 @@ func (c *LLMClient) SmartChat(ctx context.Context, prompt string, opts *SmartCha
 	}
 
 	// Make the chat call
-	var response string
+	var messages []ChatMessage
 	if opts != nil && opts.System != "" {
-		response, err = c.ChatWithSystem(ctx, decision.Model, prompt, opts.System)
-	} else {
-		response, err = c.Chat(ctx, decision.Model, prompt)
+		messages = append(messages, ChatMessage{Role: "system", Content: opts.System})
 	}
+	messages = append(messages, ChatMessage{Role: "user", Content: prompt})
+
+	resp, headers, err := c.chatCompletionHeaders(ctx, decision.Model, messages, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := firstChoiceContent(resp)
 	if err != nil {
 		return nil, err
 	}
 
 	return &SmartChatResponse{
-		Response: response,
-		Model:    decision.Model,
-		Routing:  decision,
+		Response:       response,
+		Model:          servedModel(decision.Model, resp, headers),
+		RequestedModel: decision.Model,
+		Routing:        decision,
 	}, nil
 }
