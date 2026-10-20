@@ -136,22 +136,34 @@ func (c *LLMClient) ChatWithSystem(ctx context.Context, model, prompt, system st
 	if err != nil {
 		return "", err
 	}
+	return firstChoiceContent(resp)
+}
 
+// firstChoiceContent returns the first choice's text, or an error when the
+// gateway answered with no choices.
+func firstChoiceContent(resp *ChatResponse) (string, error) {
 	if len(resp.Choices) == 0 {
 		return "", &APIError{Message: "No choices in response"}
 	}
-
 	return resp.Choices[0].Message.Content, nil
 }
 
 // ChatCompletion sends a full chat completion request (OpenAI-compatible).
 func (c *LLMClient) ChatCompletion(ctx context.Context, model string, messages []ChatMessage, opts *ChatCompletionOptions) (*ChatResponse, error) {
+	resp, _, err := c.chatCompletionHeaders(ctx, model, messages, opts)
+	return resp, err
+}
+
+// chatCompletionHeaders is ChatCompletion plus the final HTTP response
+// headers, which carry the gateway's reroute metadata (X-Served-Model,
+// X-Fallback-Model). Headers are nil when the response came from the cache.
+func (c *LLMClient) chatCompletionHeaders(ctx context.Context, model string, messages []ChatMessage, opts *ChatCompletionOptions) (*ChatResponse, http.Header, error) {
 	// Validate inputs
 	if model == "" {
-		return nil, &ValidationError{Field: "model", Message: "Model is required"}
+		return nil, nil, &ValidationError{Field: "model", Message: "Model is required"}
 	}
 	if len(messages) == 0 {
-		return nil, &ValidationError{Field: "messages", Message: "At least one message is required"}
+		return nil, nil, &ValidationError{Field: "messages", Message: "At least one message is required"}
 	}
 
 	// Build request body
@@ -197,17 +209,17 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, model string, messages [
 	body["max_tokens"] = maxTokens
 
 	// Make request with payment handling
-	respBytes, err := c.doRequest(ctx, "/v1/chat/completions", body)
+	respBytes, headers, err := c.doRequestHeaders(ctx, "/v1/chat/completions", body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var chatResp ChatResponse
 	if err := json.Unmarshal(respBytes, &chatResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return &chatResp, nil
+	return &chatResp, headers, nil
 }
 
 // GetCostSummary returns an aggregate summary of all costs logged to the persistent JSONL file.

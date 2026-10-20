@@ -81,7 +81,8 @@ reply, _ := client.Chat(ctx, "nvidia/nemotron-3.5-lightning", "Explain x402 in 1
 result, _ := client.SmartChat(ctx, "What is 2+2?", &blockrun.SmartChatOptions{
     RoutingProfile: blockrun.RoutingFree,
 })
-fmt.Println(result.Model)    // e.g. "nvidia/nemotron-3.5-lightning"
+fmt.Println(result.RequestedModel) // e.g. "nvidia/nemotron-3.5-lightning" (router's pick)
+fmt.Println(result.Model)          // the model that actually answered
 fmt.Println(result.Response) // "4"
 ```
 
@@ -523,8 +524,8 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 > (nano-omni for Simple, nemotron-3.5-lightning for the rest). When a primary's
 > health breaker is open, the gateway reroutes the call along its free ladder
 > (nemotron-3-super-120b → nemotron-3-nano-omni-30b-a3b-reasoning →
-> llama-3.2-11b-vision), so `result.Model` names the requested primary and
-> the model that served can differ. `nvidia/nemotron-3-super-120b` is hidden
+> llama-3.2-11b-vision). `result.Model` reports the model that served the
+> call and `result.RequestedModel` the primary the router chose. `nvidia/nemotron-3-super-120b` is hidden
 > from the catalog and is never routed to directly.
 > `moonshot/kimi-k2.7` is hidden from the catalog: **eco** Simple moved to
 > `google/gemini-2.5-flash-lite` and **auto** Simple to `google/gemini-2.5-flash`.
