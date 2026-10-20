@@ -510,14 +510,15 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 | **auto** | google/gemini-2.5-flash | google/gemini-3.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
 | **premium** | google/gemini-3.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.8 | openai/o3 |
 
-> DeepSeek V4 family launched 2026-04-24. The legacy `deepseek/deepseek-chat`
-> and `deepseek/deepseek-reasoner` IDs (used by **eco** Medium / Reasoning
-> above) are now V4 Flash non-thinking / thinking modes — $0.20 in / $0.40 out
-> per 1M, 1M context. The paid flagship `deepseek/deepseek-v4-pro`
-> ($0.435/$0.87 — the 75% launch promo became the permanent list price after
-> 2026-05-31) is available via direct chat calls; SmartChat keeps
-> `deepseek-reasoner` as the eco/auto reasoning primary because V4 Flash
-> thinking is cheaper.
+> DeepSeek: `deepseek/deepseek-chat` and `deepseek/deepseek-reasoner` (used by
+> **eco** Medium / Reasoning and **auto** Reasoning above) are compatibility ids
+> for DeepSeek V4.1 Flash. They serve the same model as the canonical
+> `deepseek/deepseek-v4.1-flash`, which is non-thinking, and `deepseek-reasoner`
+> enables thinking. All three cost $0.14 in / $0.28 out per 1M tokens with a 1M
+> context. SmartChat keeps the compatibility ids, matching router-core's
+> chains; there is no canonical thinking-mode id for `deepseek-reasoner`. The
+> flagship `deepseek/deepseek-v4-pro` ($1.32/$3.96) is available through
+> direct chat calls.
 >
 > Free routing, 2026-10-20: the free tiers follow the Python SDK's free table
 > (nano-omni for Simple, nemotron-3.5-lightning for the rest). When a primary's
@@ -1154,7 +1155,7 @@ Prices are not listed here — they change often. See
 | **Anthropic** | Claude Fable 5.1, Fable 5, Opus 5.5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.5, Sonnet 5.5, Sonnet 5, Sonnet 4.6, Sonnet 4.5, Haiku 4.5 |
 | **Google** | Gemini 3.1 Pro, 3.8 Flash, 3.6 Flash, 3.5 Flash, 3 Flash Preview, 3.5 Flash Lite, 3.1 Flash Lite, 2.5 Pro, 2.5 Flash, 2.5 Flash Lite |
 | **xAI** | Grok 4.7, Grok 4.6, Grok 4.5 (500K ctx, Live Search), Grok 4.3 (1M), Grok Build 0.1 (agentic coding) |
-| **DeepSeek** | DeepSeek V4 Pro, V4 Flash Chat, V4 Flash Reasoner, V4 Flash Vision (experimental) |
+| **DeepSeek** | DeepSeek V4.1 Flash (`deepseek-v4.1-flash`; also as `deepseek-chat` / `deepseek-reasoner`), V4 Pro, V4 Flash Vision (experimental) |
 | **Moonshot / MiniMax / Z.ai / Qwen / Xiaomi** | Kimi K3; MiniMax M3, M2.7; GLM-5.3, 5.3 Flash, 5.2, 5.1, 5, 5 Turbo; Qwen3.7 Max / Plus / Flash, Qwen3.8 Flash; MiMo V2.5, V2.5 Pro |
 | **Free** (<!-- br:models.free -->7<!-- /br:models.free --> models, $0) | Nemotron 3.5 Lightning, Nemotron 3 Ultra 550B, Nemotron 3 Nano Omni, Llama 3.2 11B Vision, Cohere North Mini Code, Poolside Laguna XS 2.1 |
 | **ElevenLabs** (speech) | Flash v2.5, Turbo v2.5, Multilingual v2, v3 TTS; Sound Effects |
