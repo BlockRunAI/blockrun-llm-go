@@ -2,7 +2,11 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
-## Unreleased
+## 0.23.0
+
+- **docs(deepseek): `deepseek/deepseek-v4.1-flash` is the canonical id** for
+  the model behind `deepseek-chat` / `deepseek-reasoner` ($0.14/$0.28), now
+  listed on Base and Solana.
 
 - **fix(router): `SmartChatResponse.Model` names the model that answered.**
   When the gateway reroutes a call (a free model whose health breaker is open,
