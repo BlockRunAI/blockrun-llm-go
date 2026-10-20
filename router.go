@@ -99,17 +99,30 @@ type SmartChatOptions struct {
 // premium/COMPLEX flagship, replacing anthropic/claude-opus-4.5. Opus 4.8 is
 // Anthropic's most capable model with a 1M-token context window. Older Opus
 // IDs remain available for clients pinned to their pricing.
+// Live-catalog sweep, 2026-10-20 (GET /v1/models + a $0 probe of each free id):
+//   - nvidia/nemotron-3-super-120b is no longer listed; the gateway answers it
+//     with nvidia/llama-3.2-11b-vision, so the free table was naming a model
+//     that never served the call.
+//   - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning (and every other free id
+//     except llama-3.2-11b-vision) is listed with available:false and is
+//     redirected too. nvidia/llama-3.2-11b-vision is the only free model the
+//     catalog marks available on every fetch (the flag is a live health
+//     signal; laguna-xs-2.1 flapped), so all four free tiers route to it.
+//   - moonshot/kimi-k2.7 is hidden from /v1/models. Eco/SIMPLE takes
+//     google/gemini-2.5-flash-lite ($0.10/$0.40) and Auto/SIMPLE takes
+//     google/gemini-2.5-flash ($0.30/$2.50), matching router-core's eco
+//     SIMPLE first live rung and auto SIMPLE primary.
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
 	RoutingFree: {
-		TierSimple: "nvidia/nemotron-3-super-120b", TierMedium: "nvidia/nemotron-3-super-120b",
-		TierComplex: "nvidia/nemotron-3-super-120b", TierReasoning: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+		TierSimple: "nvidia/llama-3.2-11b-vision", TierMedium: "nvidia/llama-3.2-11b-vision",
+		TierComplex: "nvidia/llama-3.2-11b-vision", TierReasoning: "nvidia/llama-3.2-11b-vision",
 	},
 	RoutingEco: {
-		TierSimple: "moonshot/kimi-k2.7", TierMedium: "deepseek/deepseek-chat",
+		TierSimple: "google/gemini-2.5-flash-lite", TierMedium: "deepseek/deepseek-chat",
 		TierComplex: "google/gemini-2.5-pro", TierReasoning: "deepseek/deepseek-reasoner",
 	},
 	RoutingAuto: {
-		TierSimple: "moonshot/kimi-k2.7", TierMedium: "google/gemini-3.5-flash",
+		TierSimple: "google/gemini-2.5-flash", TierMedium: "google/gemini-3.5-flash",
 		TierComplex: "google/gemini-3.1-pro", TierReasoning: "deepseek/deepseek-reasoner",
 	},
 	RoutingPremium: {

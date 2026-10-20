@@ -6,21 +6,39 @@ import (
 	"testing"
 )
 
-// The free profile must not name ids the gateway has dropped from /v1/models.
-// Each of these is answered by a MODEL_REDIRECTS target on the gateway; the
-// table names that target instead.
-func TestFreeRoutingAvoidsRetiredIDs(t *testing.T) {
-	retired := []string{
-		"nvidia/deepseek-v4-flash",
-		"nvidia/llama-4-maverick",
-		"nvidia/qwen3-coder-480b",
-	}
-	for tier, model := range routingTable[RoutingFree] {
-		for _, id := range retired {
-			if model == id {
-				t.Errorf("free/%s routes to retired %s", tier, id)
+// retiredRoutingIDs are ids the gateway has dropped from /v1/models, hidden,
+// or lists with available:false. Each is answered by a redirect to another
+// model, so routing to one makes SmartChatResponse.Model name a model that
+// never served the call. TestRoutingTableMatchesLiveCatalog
+// (BLOCKRUN_LIVE_CATALOG=1) checks the table against the live catalog itself.
+var retiredRoutingIDs = []string{
+	"nvidia/deepseek-v4-flash",
+	"nvidia/llama-4-maverick",
+	"nvidia/qwen3-coder-480b",
+	"nvidia/nemotron-3-super-120b",                  // left /v1/models; redirected 2026-10
+	"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", // available:false 2026-10
+	"nvidia/nemotron-3.5-lightning",                 // available:false 2026-10
+	"nvidia/nemotron-3-ultra-550b",                  // available:false 2026-10
+	"moonshot/kimi-k2.5",                            // hidden
+	"moonshot/kimi-k2.6",                            // hidden
+	"moonshot/kimi-k2.7",                            // hidden
+}
+
+func TestRoutingTableAvoidsRetiredIDs(t *testing.T) {
+	for profile, tiers := range routingTable {
+		for tier, model := range tiers {
+			for _, id := range retiredRoutingIDs {
+				if model == id {
+					t.Errorf("%s/%s routes to retired %s", profile, tier, id)
+				}
 			}
 		}
+	}
+}
+
+// The free profile must stay inside the $0 NVIDIA-hosted tier.
+func TestFreeRoutingStaysOnFreeTier(t *testing.T) {
+	for tier, model := range routingTable[RoutingFree] {
 		if !strings.HasPrefix(model, "nvidia/") {
 			t.Errorf("free/%s routes to %s, outside the free NVIDIA tier", tier, model)
 		}
