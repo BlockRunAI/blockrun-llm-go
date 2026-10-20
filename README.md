@@ -75,26 +75,26 @@ credit account is enough:
 
 ```go
 // Option 1: call a free model directly
-reply, _ := client.Chat(ctx, "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "Explain x402 in 1 sentence")
+reply, _ := client.Chat(ctx, "nvidia/llama-3.2-11b-vision", "Explain x402 in 1 sentence")
 
 // Option 2: let the smart router pick the best free model per request
 result, _ := client.SmartChat(ctx, "What is 2+2?", &blockrun.SmartChatOptions{
     RoutingProfile: blockrun.RoutingFree,
 })
-fmt.Println(result.Model)    // e.g. "nvidia/nemotron-3-super-120b"
+fmt.Println(result.Model)    // "nvidia/llama-3.2-11b-vision"
 fmt.Println(result.Response) // "4"
 ```
 
-**Available free models** (input + output both $0, from the live `/v1/models` catalog, 2026-10-02):
+**Available free models** (input + output both $0, `available: true` in the live `/v1/models` catalog, 2026-10-20):
 
 | Model ID | Context | Best For |
 |----------|---------|----------|
-| `nvidia/nemotron-3-ultra-550b` | 1M | Largest free model — 550B / 55B active MoE reasoning |
-| `nvidia/nemotron-3.5-lightning` | 1M | Thinking-mode reasoning, long context |
-| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | 256K | Multimodal reasoning — text, images, video, audio |
-| `nvidia/llama-3.2-11b-vision` | 128K | Meta Llama 3.2 vision |
-| `cohere/north-mini-code` | 256K | Compact coding model |
-| `poolside/laguna-xs-2.1` | 131K | Fast compact coding model |
+| `nvidia/llama-3.2-11b-vision` | 128K | Meta Llama 3.2 vision — the only free model currently marked available |
+
+The catalog also lists `nvidia/nemotron-3-ultra-550b`, `nvidia/nemotron-3.5-lightning`,
+`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, `nvidia/muse-glimmer-30b`,
+`cohere/north-mini-code` and `poolside/laguna-xs-2.1` as free, but with
+`available: false`; calls to them are redirected to another free model.
 
 > The free pool rotates as NVIDIA retires deployments. Retired free IDs keep
 > answering through gateway redirects, but `GET /v1/models` is the list to
@@ -499,9 +499,9 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 
 | Profile | Simple | Medium | Complex | Reasoning |
 |---------|--------|--------|---------|-----------|
-| **free** | nvidia/nemotron-3-super-120b | nvidia/nemotron-3-super-120b | nvidia/nemotron-3-super-120b | nvidia/nemotron-3-nano-omni-30b-a3b-reasoning |
-| **eco** | moonshot/kimi-k2.7 | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
-| **auto** | moonshot/kimi-k2.7 | google/gemini-3.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
+| **free** | nvidia/llama-3.2-11b-vision | nvidia/llama-3.2-11b-vision | nvidia/llama-3.2-11b-vision | nvidia/llama-3.2-11b-vision |
+| **eco** | google/gemini-2.5-flash-lite | deepseek/deepseek-chat | google/gemini-2.5-pro | deepseek/deepseek-reasoner |
+| **auto** | google/gemini-2.5-flash | google/gemini-3.5-flash | google/gemini-3.1-pro | deepseek/deepseek-reasoner |
 | **premium** | google/gemini-3.5-flash | openai/gpt-5.5 | anthropic/claude-opus-4.8 | openai/o3 |
 
 > DeepSeek V4 family launched 2026-04-24. The legacy `deepseek/deepseek-chat`
@@ -513,14 +513,16 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 > `deepseek-reasoner` as the eco/auto reasoning primary because V4 Flash
 > thinking is cheaper.
 >
-> Free routing, 2026-10-02: `nvidia/deepseek-v4-flash`,
-> `nvidia/llama-4-maverick` and `nvidia/qwen3-coder-480b` left the gateway
-> catalog, and the gateway already answered all three with
-> `nvidia/nemotron-3-super-120b`. The free Simple / Medium / Complex tiers now
-> name that model directly, so `result.Model` matches what serves the call.
-> Reasoning stays on `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`. The free
-> pool is load-shed by a gateway circuit breaker, so a free call can still be
-> rerouted to another $0 model or refused with `FREE_MODEL_FAILED` under load.
+> Live-catalog sweep, 2026-10-20: `nvidia/nemotron-3-super-120b` left
+> `/v1/models` and `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` is listed
+> `available: false`; the gateway answers both with
+> `nvidia/llama-3.2-11b-vision`, the only free model marked available, so every
+> free tier now names it and `result.Model` matches what serves the call.
+> `moonshot/kimi-k2.7` is hidden from the catalog: **eco** Simple moved to
+> `google/gemini-2.5-flash-lite` and **auto** Simple to `google/gemini-2.5-flash`.
+> The free pool is load-shed by a gateway circuit breaker, so a free call can
+> still be rerouted to another $0 model or refused with `FREE_MODEL_FAILED`
+> under load.
 
 ## Streaming
 

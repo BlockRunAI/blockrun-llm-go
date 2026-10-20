@@ -2,6 +2,21 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## Unreleased
+
+- **fix(router): SmartChat no longer routes to ids the gateway does not serve.**
+  The free profile named `nvidia/nemotron-3-super-120b` (gone from
+  `/v1/models`) and `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`
+  (`available: false`); the gateway redirected both to
+  `nvidia/llama-3.2-11b-vision`, so `SmartChatResponse.Model` named a model
+  that never served the call. All four free tiers now route to
+  `nvidia/llama-3.2-11b-vision`, the only free model the catalog marks
+  available. Eco and Auto Simple routed to hidden `moonshot/kimi-k2.7`; they
+  now route to `google/gemini-2.5-flash-lite` and `google/gemini-2.5-flash`
+  (router-core's eco/auto SIMPLE choices). A retired-id test covers every
+  profile, and `BLOCKRUN_LIVE_CATALOG=1 go test` checks the table against the
+  live catalog.
+
 ## 0.22.1
 
 - **fix(solana): `MusicResponse.TxHash` is filled for every Solana track.**
