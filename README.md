@@ -812,13 +812,15 @@ BlockRun Voice (ElevenLabs) — OpenAI-compatible TTS plus cinematic sound
 effects. TTS price scales with character count: `(chars / 1000) × model rate`,
 minimum $0.001/request. Synthesis is synchronous (<1s for Flash).
 
-| Model | Price | Max Input | Notes |
-|-------|-------|-----------|-------|
-| `elevenlabs/flash-v2.5` | $0.05/1k chars | 40k chars | ~75ms latency, 32 languages (default) |
-| `elevenlabs/turbo-v2.5` | $0.05/1k chars | 40k chars | ~250ms latency, balanced quality |
-| `elevenlabs/multilingual-v2` | $0.10/1k chars | 10k chars | Long-form narration, audiobooks |
-| `elevenlabs/v3` | $0.10/1k chars | 5k chars | Max expressiveness, 70+ languages |
-| `elevenlabs/sound-effects` | $0.05/generation | 1k chars | Sound effects up to 22s |
+Live per-model prices: [blockrun.ai/pricing](https://blockrun.ai/pricing) (agents: `GET https://blockrun.ai/api/v1/models`). Prices are not copied here, so this page never goes stale on a reprice.
+
+| Model | Max Input | Notes |
+| ------- | ----------- | ------- |
+| `elevenlabs/flash-v2.5` | 40k chars | ~75ms latency, 32 languages (default) |
+| `elevenlabs/turbo-v2.5` | 40k chars | ~250ms latency, balanced quality |
+| `elevenlabs/multilingual-v2` | 10k chars | Long-form narration, audiobooks |
+| `elevenlabs/v3` | 5k chars | Max expressiveness, 70+ languages |
+| `elevenlabs/sound-effects` | 1k chars | Sound effects up to 22s |
 
 ```go
 speechClient, err := blockrun.NewSpeechClient("")
@@ -849,12 +851,14 @@ voices, err := speechClient.ListVoices(ctx)
 
 Supported models:
 
-| Model | Price |
-|-------|-------|
-| `xai/grok-imagine-video` | $0.05/sec (8s default → $0.42/clip) |
-| `bytedance/seedance-1.5-pro` | $0.03/sec (5s default, up to 10s, 720p) |
-| `bytedance/seedance-2.0-fast` | $0.15/sec (~60-80s gen, sweet-spot price/quality) |
-| `bytedance/seedance-2.0` | $0.30/sec (720p Pro) |
+Live per-model prices: [blockrun.ai/pricing](https://blockrun.ai/pricing) (agents: `GET https://blockrun.ai/api/v1/models`). Prices are not copied here, so this page never goes stale on a reprice.
+
+| Model | Notes |
+| ------- | --- |
+| `xai/grok-imagine-video` |  |
+| `bytedance/seedance-1.5-pro` | 5s default, up to 10s, 720p |
+| `bytedance/seedance-2.0-fast` | ~60-80s gen, sweet-spot price/quality |
+| `bytedance/seedance-2.0` | 720p Pro |
 
 ```go
 videoClient, err := blockrun.NewVideoClient("")
