@@ -430,9 +430,10 @@ func (bc *baseClient) followSolanaPaidSubmit(
 	return body, header, job.paidNote(), err
 }
 
-// solanaMaxPaidPollRefusals bounds a video poll's payment answered 402 without
-// being refused outright (settlement held by another poll, outcome unknown, a
-// stale blockhash at settle). The next poll reads the job's settlement record.
+// solanaMaxPaidPollRefusals bounds the payments signed for one finished video that
+// were not refused outright: a 402 (settlement held by another poll, outcome
+// unknown, a stale blockhash at settle), a 5xx or 429, or a lost answer. The next
+// poll reads the job's settlement record.
 const solanaMaxPaidPollRefusals = 4
 
 // followSolanaVideoJob follows a Solana video job. The submit only verified the
@@ -659,12 +660,14 @@ func (c *VideoClient) followSolanaVideoJob(ctx context.Context, endpoint string,
 				return nil, &PaymentError{Message: fmt.Sprintf("Payment for the finished video did not settle after %d attempts: %s. %s", solanaMaxPaidPollRefusals, strings.TrimSpace(string(paidBody)), resumeNote())}
 			}
 			wait = pollRetryAfter(paidResp.Header, interval)
-		case paidResp.StatusCode == http.StatusAccepted || isPollNotYet(paidResp.StatusCode):
+		case paidResp.StatusCode == http.StatusAccepted:
 			wait = pollRetryAfter(paidResp.Header, interval)
-		case isCountedPollFailure(paidResp.StatusCode):
-			failures++
-			if failures >= solanaMaxPollTransportErrors {
-				return nil, &APIError{StatusCode: paidResp.StatusCode, Message: fmt.Sprintf("Poll failed %d times in a row: %s. %s", failures, string(paidBody), resumeNote())}
+		case isPollNotYet(paidResp.StatusCode) || isCountedPollFailure(paidResp.StatusCode):
+			// The proof poll before the next attempt answers normally, so only this
+			// count can stop a run of failing payments from signing to the deadline.
+			refusalsLeft--
+			if refusalsLeft <= 0 {
+				return nil, &APIError{StatusCode: paidResp.StatusCode, Message: fmt.Sprintf("Paid video poll failed %d times: %s. %s", solanaMaxPaidPollRefusals, string(paidBody), resumeNote())}
 			}
 			wait = pollRetryAfter(paidResp.Header, interval)
 		case paidResp.StatusCode == http.StatusOK:
@@ -692,6 +695,13 @@ func (c *VideoClient) signFromChallenge(header http.Header, body []byte, pollURL
 		}
 		if option, err = c.extractPaymentDetails(req); err != nil {
 			return "", nil, err
+		}
+		// The job was quoted at submit. Selection only checks the chain family, and
+		// the signer transfers whichever mint it is handed, while spend tracking
+		// reads the amount as six-decimal USDC.
+		if option.Asset != pay.option.Asset || option.Network != pay.option.Network {
+			return "", nil, fmt.Errorf("the completion challenge asks for asset %s on %s, but the job was submitted with %s on %s",
+				option.Asset, option.Network, pay.option.Asset, pay.option.Network)
 		}
 		description, extensions = req.Resource.Description, req.Extensions
 		if req.Resource.URL != "" {

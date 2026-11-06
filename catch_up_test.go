@@ -763,3 +763,153 @@ func TestSolanaVideo_HeldSettlementIsRetriedThenBounded(t *testing.T) {
 		t.Errorf("%d paid polls, want %d", paid.Load(), solanaMaxPaidPollRefusals)
 	}
 }
+
+func TestReceiptCharged_ChargedAmountWins(t *testing.T) {
+	cases := []struct {
+		receipt map[string]any
+		want    bool
+	}{
+		{map[string]any{"amount": "1000", "extra": map[string]any{"chargedAmount": "0"}}, false},
+		{map[string]any{"amount": "0", "extra": map[string]any{"chargedAmount": "5"}}, true},
+		{map[string]any{"amount": "1000", "extra": map[string]any{"chargedAmount": "n/a"}}, true},
+		{map[string]any{"amount": "1000"}, true},
+		{map[string]any{"amount": "0"}, false},
+		{map[string]any{}, false},
+	}
+	for _, tc := range cases {
+		if got := receiptCharged(tc.receipt); got != tc.want {
+			t.Errorf("receiptCharged(%v) = %v, want %v", tc.receipt, got, tc.want)
+		}
+	}
+}
+
+func TestPollAsyncJob_SettlingIsNeverReportedAsFree(t *testing.T) {
+	run := func(t *testing.T, submit string, answer func(n int32, w http.ResponseWriter)) error {
+		t.Helper()
+		var polls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { answer(polls.Add(1), w) }))
+		defer srv.Close()
+		c, err := NewVideoClient(testPrivateKey, WithVideoAPIURL(srv.URL))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = c.pollAsyncJob(context.Background(), asyncJob{
+			label: "x", endpoint: "/v1/x", submitBody: []byte(strings.Replace(submit, "POLL", srv.URL+"/j", 1)),
+			pay: &imagePayment{option: &PaymentOption{Amount: "1"}, payload: "sig"}, budget: 100 * time.Millisecond, interval: time.Millisecond,
+		})
+		return err
+	}
+	const plainSubmit = `{"id":"j","poll_url":"POLL"}`
+	pending := func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"status":"in_progress","payment_status":"verified"}`)
+	}
+
+	t.Run("still verified is free", func(t *testing.T) {
+		err := run(t, plainSubmit, func(_ int32, w http.ResponseWriter) { pending(w) })
+		if err == nil || !strings.Contains(err.Error(), "No payment was taken") {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("settling then pending", func(t *testing.T) {
+		err := run(t, plainSubmit, func(n int32, w http.ResponseWriter) {
+			if n == 1 {
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = io.WriteString(w, `{"status":"in_progress","payment_status":"settling"}`)
+				return
+			}
+			pending(w)
+		})
+		if err == nil || strings.Contains(err.Error(), "No payment was taken") || !strings.Contains(err.Error(), "may have been taken") {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("settling then repeated 500s", func(t *testing.T) {
+		err := run(t, plainSubmit, func(n int32, w http.ResponseWriter) {
+			if n == 1 {
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = io.WriteString(w, `{"status":"in_progress","payment_status":"settling"}`)
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		})
+		if err == nil || !strings.Contains(err.Error(), "may have been taken") {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("in doubt at submit", func(t *testing.T) {
+		err := run(t, `{"id":"j","poll_url":"POLL","payment_status":"settled_optimistic"}`, func(_ int32, w http.ResponseWriter) { pending(w) })
+		if err == nil || !strings.Contains(err.Error(), "may have been taken") {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("failed after settling makes no free claim", func(t *testing.T) {
+		err := run(t, plainSubmit, func(n int32, w http.ResponseWriter) {
+			if n == 1 {
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = io.WriteString(w, `{"status":"in_progress","payment_status":"settling"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"status":"failed"}`)
+		})
+		if err == nil || strings.Contains(err.Error(), "no payment was taken") {
+			t.Errorf("err = %v", err)
+		}
+	})
+}
+
+func TestSolanaVideo_ChallengeForAnotherAssetIsNotSigned(t *testing.T) {
+	for name, mutate := range map[string]func(*PaymentOption){
+		"asset":   func(o *PaymentOption) { o.Asset = "So11111111111111111111111111111111111111112" },
+		"network": func(o *PaymentOption) { o.Network = "solana:EtWTRABZaYq6iMfeYKouRu166VoYwO2u" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newSolGateway(t, solVideoRoute, "job-1")
+			opt := testPaymentOption(USDCSolanaMainnet)
+			mutate(opt)
+			raw, _ := json.Marshal(PaymentRequirement{X402Version: 2, Accepts: []PaymentOption{*opt}})
+			other := base64.StdEncoding.EncodeToString(raw)
+			g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) {
+				if r.Header.Get("PAYMENT-SIGNATURE") != "" {
+					t.Error("a payment was signed against changed terms")
+				}
+				w.Header().Set("payment-required", other)
+				w.WriteHeader(http.StatusPaymentRequired)
+				_, _ = io.WriteString(w, `{"status":"completed"}`)
+			}
+			apiURL, rpcURL := g.start()
+			c := solVideoClient(t, apiURL, rpcURL)
+			_, err := c.Generate(context.Background(), "a cat", nil)
+			var pe *PaymentError
+			if !errors.As(err, &pe) || !strings.Contains(err.Error(), "submitted with") {
+				t.Fatalf("err = %v", err)
+			}
+			if got := c.GetSpending(); got.Calls != 0 {
+				t.Errorf("spending = %+v", got)
+			}
+		})
+	}
+}
+
+func TestSolanaVideo_FailingPaidPollsStopSigning(t *testing.T) {
+	for _, status := range []int{http.StatusInternalServerError, http.StatusTooManyRequests, http.StatusBadGateway} {
+		g := newSolGateway(t, solVideoRoute, "job-1")
+		var paid atomic.Int32
+		g.pollAnswer = func(n int, r *http.Request, w http.ResponseWriter) {
+			if r.Header.Get("PAYMENT-SIGNATURE") == "" {
+				solChallenge(g, w, "completed")
+				return
+			}
+			paid.Add(1)
+			w.WriteHeader(status)
+		}
+		apiURL, rpcURL := g.start()
+		c := solVideoClient(t, apiURL, rpcURL)
+		if _, err := c.Generate(context.Background(), "a cat", nil); err == nil || !strings.Contains(err.Error(), "may have settled") {
+			t.Errorf("status %d: err = %v", status, err)
+		}
+		if paid.Load() != solanaMaxPaidPollRefusals {
+			t.Errorf("status %d: %d payments signed, want %d", status, paid.Load(), solanaMaxPaidPollRefusals)
+		}
+	}
+}

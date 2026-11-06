@@ -95,23 +95,22 @@ func paymentReceipt(h http.Header) map[string]any {
 	return nil
 }
 
-// receiptCharged reports whether a receipt states a positive charge: the metered
-// extra.chargedAmount, else the top-level amount.
+// receiptCharged reports whether a receipt states a positive charge. A metered
+// extra.chargedAmount is the charge, zero included; amount is read only without
+// one.
 func receiptCharged(receipt map[string]any) bool {
-	candidates := []any{receipt["amount"]}
-	if extra, ok := receipt["extra"].(map[string]any); ok {
-		candidates = append(candidates, extra["chargedAmount"])
+	amount, ok := "", false
+	if extra, isMap := receipt["extra"].(map[string]any); isMap {
+		amount, ok = extra["chargedAmount"].(string)
 	}
-	for _, c := range candidates {
-		s, ok := c.(string)
-		if !ok || !digitsOnly.MatchString(s) {
-			continue
-		}
-		if n, err := strconv.ParseFloat(s, 64); err == nil && n > 0 {
-			return true
-		}
+	if !ok || !digitsOnly.MatchString(amount) {
+		amount, ok = receipt["amount"].(string)
 	}
-	return false
+	if !ok || !digitsOnly.MatchString(amount) {
+		return false
+	}
+	n, err := strconv.ParseFloat(amount, 64)
+	return err == nil && n > 0
 }
 
 // recordPaidCall books a paid response unless the gateway says it skipped

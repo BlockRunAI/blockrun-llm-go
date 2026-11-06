@@ -42,6 +42,8 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 		ID      string `json:"id"`
 		PollURL string `json:"poll_url"`
 		Status  string `json:"status"`
+		// PaymentStatus is what the gateway says about the money at submit.
+		PaymentStatus string `json:"payment_status"`
 	}
 	if err := json.Unmarshal(job.submitBody, &submitted); err != nil {
 		return nil, nil, fmt.Errorf("failed to decode submit response: %w", err)
@@ -64,7 +66,8 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 	deadline := time.Now().Add(job.budget)
 	wait := job.interval
 	failures := 0
-	lostAnswer := false
+	// inDoubt is set once anything says money may have moved, and never cleared.
+	inDoubt := paymentInDoubt(submitted.PaymentStatus)
 
 	for time.Now().Before(deadline) {
 		select {
@@ -93,7 +96,7 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
 			}
-			lostAnswer = true
+			inDoubt = true
 			failures++
 			if failures >= solanaMaxPollTransportErrors {
 				return nil, nil, fmt.Errorf("poll request failed %d times in a row: %w.%s", failures, err, job.givingUpNote(pollURL, true))
@@ -113,13 +116,16 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 		if s, ok := data["status"].(string); ok && s != "" {
 			lastStatus = s
 		}
+		if s, _ := data["payment_status"].(string); paymentInDoubt(s) {
+			inDoubt = true
+		}
 
 		if lastStatus == "failed" {
 			// Settlement waits for a completed poll on the wallet rail, so a failed
 			// job costs nothing unless the gateway says otherwise. Credit is taken
 			// at submit, so the account rail makes no such claim.
 			fallback := ""
-			if job.pay != nil {
+			if job.pay != nil && !inDoubt {
 				fallback = " (no payment was taken)"
 			}
 			return nil, nil, &APIError{
@@ -137,6 +143,10 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 			}
 			return body, resp.Header, nil
 		}
+		// The job finished but nothing was delivered: a settlement may be landing.
+		if lastStatus == "completed" {
+			inDoubt = true
+		}
 		if resp.StatusCode == http.StatusAccepted || isPollNotYet(resp.StatusCode) {
 			wait = pollRetryAfter(resp.Header, job.interval)
 			continue
@@ -146,7 +156,7 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 			if failures >= solanaMaxPollTransportErrors {
 				return nil, nil, &APIError{
 					StatusCode: resp.StatusCode,
-					Message:    fmt.Sprintf("Poll failed %d times in a row: %s.%s", failures, string(body), job.givingUpNote(pollURL, lostAnswer)),
+					Message:    fmt.Sprintf("Poll failed %d times in a row: %s.%s", failures, string(body), job.givingUpNote(pollURL, inDoubt)),
 				}
 			}
 			wait = pollRetryAfter(resp.Header, job.interval)
@@ -164,20 +174,20 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 		StatusCode: http.StatusGatewayTimeout,
 		Message: fmt.Sprintf(
 			"%s did not complete within %.0fs (last status: %s).%s",
-			job.label, job.budget.Seconds(), lastStatus, job.givingUpNote(pollURL, lostAnswer),
+			job.label, job.budget.Seconds(), lastStatus, job.givingUpNote(pollURL, inDoubt),
 		),
 	}
 }
 
 // givingUpNote says what stopping now means for the money. Only the wallet rail
 // defers settlement to a completed poll, so only there is giving up free, and
-// only if no poll's answer was lost.
-func (j asyncJob) givingUpNote(pollURL string, lostAnswer bool) string {
+// only if nothing has put that in doubt.
+func (j asyncJob) givingUpNote(pollURL string, inDoubt bool) string {
 	if j.pay == nil {
 		return fmt.Sprintf(" The account is billed if the job completes; it stays claimable at %s with the same API key.", pollURL)
 	}
-	if lostAnswer {
-		return fmt.Sprintf(" A poll's answer was lost, so payment may have been taken: check your wallet and poll %s with the same wallet before submitting again.", pollURL)
+	if inDoubt {
+		return fmt.Sprintf(" Payment may have been taken (a poll's answer was lost, or a settlement was under way): check your wallet and poll %s with the same wallet before submitting again.", pollURL)
 	}
 	return " No payment was taken."
 }
@@ -194,4 +204,15 @@ func isCompletedPoll(code int, status string, data map[string]any) bool {
 	}
 	result, ok := data["data"].([]any)
 	return ok && len(result) > 0
+}
+
+// paymentInDoubt reports whether a payment_status means money may have moved.
+// Only the states where the gateway has not begun to settle are safe, so a status
+// added later reads as in doubt.
+func paymentInDoubt(status string) bool {
+	switch status {
+	case "", "verified", "not_charged", "charged_on_completion":
+		return false
+	}
+	return true
 }
