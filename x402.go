@@ -263,8 +263,15 @@ func ExtractPaymentDetailsForChain(req *PaymentRequirement, chain string) (*Paym
 	if req == nil || len(req.Accepts) == 0 {
 		return nil, fmt.Errorf("no payment options in payment required response")
 	}
+	if len(exactOptions(req.Accepts)) == 0 {
+		schemes := make([]string, 0, len(req.Accepts))
+		for i := range req.Accepts {
+			schemes = append(schemes, strconv.Quote(req.Accepts[i].Scheme))
+		}
+		return nil, fmt.Errorf("this SDK signs the exact scheme, but the 402 only offers %s", strings.Join(schemes, ", "))
+	}
 
-	option, err := selectPaymentOption(req.Accepts, chain)
+	option, err := selectPaymentOption(exactOptions(req.Accepts), chain)
 	if err != nil {
 		return nil, err
 	}
@@ -281,6 +288,21 @@ func ExtractPaymentDetailsForChain(req *PaymentRequirement, chain string) (*Paym
 	}
 
 	return option, nil
+}
+
+// exactOptions keeps the options this SDK can sign. sol.blockrun.ai also offers
+// batch-settlement, and a Base gateway may offer upto. Signing an exact transfer
+// against those terms would be refused at best, and against an upto would pay
+// its ceiling, so they are never selected, whatever order the gateway lists them
+// in. An option with no scheme is exact (the v1 format).
+func exactOptions(accepts []PaymentOption) []PaymentOption {
+	exact := make([]PaymentOption, 0, len(accepts))
+	for i := range accepts {
+		if accepts[i].Scheme == "" || accepts[i].Scheme == "exact" {
+			exact = append(exact, accepts[i])
+		}
+	}
+	return exact
 }
 
 // selectPaymentOption returns a copy of the first option payable on chain, or

@@ -22,6 +22,9 @@ func (c *LLMClient) Defi(ctx context.Context, path string, params map[string]str
 	if strings.TrimSpace(path) == "" {
 		return nil, &ValidationError{Field: "path", Message: "Path is required"}
 	}
+	if err := c.requireBaseGateway("DefiLlama"); err != nil {
+		return nil, err
+	}
 
 	respBytes, err := c.doGetWithPayment(ctx, "/v1/defillama/"+path, params)
 	if err != nil {

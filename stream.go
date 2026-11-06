@@ -110,38 +110,7 @@ func (c *LLMClient) ChatCompletionStream(ctx context.Context, model string, mess
 		"stream":   true,
 	}
 
-	// Apply options
-	maxTokens := DefaultMaxTokens
-	if opts != nil {
-		if opts.MaxTokens > 0 {
-			maxTokens = opts.MaxTokens
-		}
-		if opts.Temperature > 0 {
-			body["temperature"] = opts.Temperature
-		}
-		if opts.TopP > 0 {
-			body["top_p"] = opts.TopP
-		}
-		if opts.SearchParameters != nil {
-			body["search_parameters"] = opts.SearchParameters
-		} else if opts.Search {
-			body["search_parameters"] = map[string]string{"mode": "on"}
-		}
-		if opts.Tools != nil {
-			body["tools"] = opts.Tools
-		}
-		if opts.ToolChoice != nil {
-			body["tool_choice"] = opts.ToolChoice
-		}
-		// OpenAI-compatible response shaping (honored by the gateway across providers)
-		if opts.ResponseFormat != nil {
-			body["response_format"] = opts.ResponseFormat
-		}
-		if opts.Stop != nil {
-			body["stop"] = opts.Stop
-		}
-	}
-	body["max_tokens"] = maxTokens
+	applyChatOptions(body, opts)
 
 	url := c.apiURL + "/v1/chat/completions"
 
@@ -234,7 +203,7 @@ func (c *LLMClient) handleStreamPaymentAndRetry(ctx context.Context, url string,
 
 	retryResp, err := c.httpClient.Do(retryReq)
 	if err != nil {
-		return nil, fmt.Errorf("retry request failed: %w", err)
+		return nil, fmt.Errorf("paid request failed in transit, so the payment may have settled; check your wallet before retrying: %w", err)
 	}
 
 	// Check for payment rejection
@@ -249,27 +218,11 @@ func (c *LLMClient) handleStreamPaymentAndRetry(ctx context.Context, url string,
 		bodyBytes, _ := io.ReadAll(retryResp.Body)
 		return nil, &APIError{
 			StatusCode: retryResp.StatusCode,
-			Message:    fmt.Sprintf("API error after payment: %s", string(bodyBytes)),
+			Message:    paidFailureMessage(retryResp.Header, bodyBytes),
 		}
 	}
 
-	// Track spending
-	c.mu.Lock()
-	c.sessionCalls++
-	var costUSD float64
-	if amountStr := paymentOption.Amount; amountStr != "" {
-		var amountMicro float64
-		if _, err := fmt.Sscanf(amountStr, "%f", &amountMicro); err == nil {
-			costUSD = amountMicro / 1_000_000
-			c.sessionTotalUSD += costUSD
-		}
-	}
-	c.mu.Unlock()
-
-	if c.costLog != nil && costUSD > 0 {
-		endpoint := strings.TrimPrefix(url, c.apiURL)
-		c.costLog.Append(endpoint, costUSD)
-	}
+	c.recordPaidCall(retryResp.Header, paymentOption.Amount, strings.TrimPrefix(url, c.apiURL))
 
 	return &Stream{
 		scanner: bufio.NewScanner(retryResp.Body),

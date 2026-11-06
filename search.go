@@ -8,7 +8,11 @@ import (
 
 // SearchOptions contains optional parameters for the Search endpoint.
 type SearchOptions struct {
-	Sources    []string `json:"sources,omitempty"`     // e.g. ["web", "x", "news"]
+	// Sources are "web" (the default) and "news". sol.blockrun.ai also takes "x",
+	// at a higher flat price, which sets the price of the whole call. blockrun.ai
+	// refuses "x" with a 400 before quoting: on Base, search X in chat on an xai/*
+	// model with an x_search tool.
+	Sources    []string `json:"sources,omitempty"`
 	MaxResults int      `json:"max_results,omitempty"` // max results to return
 	FromDate   string   `json:"from_date,omitempty"`   // YYYY-MM-DD
 	ToDate     string   `json:"to_date,omitempty"`     // YYYY-MM-DD

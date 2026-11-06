@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+// SurfClient is retired with the gateway's Surf endpoints.
+//
+// Deprecated: both gateways have answered every /v1/surf/* call with 410
+// endpoint_retired since 2026-09-06. Use LLMClient.Price for prices, Defi for
+// DeFi data, PM for prediction markets and Dex for DEX quotes.
+// This client will be removed in a future release.
+//
 // SurfClient is the BlockRun Surf client — asksurf.ai crypto-data gateway via
 // x402 micropayments.
 //
@@ -55,6 +62,7 @@ func WithSurfHTTPClient(client *http.Client) SurfClientOption {
 //
 // If privateKey is empty, it will be read from the BLOCKRUN_WALLET_KEY
 // or BASE_CHAIN_WALLET_KEY environment variable.
+// Deprecated: Surf is retired; see SurfClient.
 func NewSurfClient(privateKey string, opts ...SurfClientOption) (*SurfClient, error) {
 	bc, err := newBaseClient(privateKey, "", DefaultTimeout)
 	if err != nil {

@@ -172,7 +172,25 @@ func (c *LLMClient) chatCompletionHeaders(ctx context.Context, model string, mes
 		"messages": messages,
 	}
 
-	// Apply options
+	applyChatOptions(body, opts)
+
+	// Make request with payment handling
+	respBytes, headers, err := c.doRequestHeaders(ctx, "/v1/chat/completions", body)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var chatResp ChatResponse
+	if err := json.Unmarshal(respBytes, &chatResp); err != nil {
+		return nil, nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &chatResp, headers, nil
+}
+
+// applyChatOptions writes the chat options into a request body. Chat and streamed
+// chat share it, so an option cannot reach one and miss the other.
+func applyChatOptions(body map[string]any, opts *ChatCompletionOptions) {
 	maxTokens := DefaultMaxTokens
 	if opts != nil {
 		if opts.MaxTokens > 0 {
@@ -205,21 +223,11 @@ func (c *LLMClient) chatCompletionHeaders(ctx context.Context, model string, mes
 		if opts.Stop != nil {
 			body["stop"] = opts.Stop
 		}
+		if opts.ReasoningEffort != "" {
+			body["reasoning_effort"] = string(opts.ReasoningEffort)
+		}
 	}
 	body["max_tokens"] = maxTokens
-
-	// Make request with payment handling
-	respBytes, headers, err := c.doRequestHeaders(ctx, "/v1/chat/completions", body)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var chatResp ChatResponse
-	if err := json.Unmarshal(respBytes, &chatResp); err != nil {
-		return nil, nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &chatResp, headers, nil
 }
 
 // GetCostSummary returns an aggregate summary of all costs logged to the persistent JSONL file.

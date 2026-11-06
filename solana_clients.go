@@ -155,6 +155,7 @@ func NewPortraitClientSolana(privateKey, rpcURL string, opts ...PortraitClientOp
 // Surf's GET endpoints are paid GETs, so without this constructor a Solana
 // wallet had no way to reach them at all: NewSurfClient goes through
 // newBaseClient, which never sets chain.
+// Deprecated: Surf is retired; see SurfClient.
 func NewSurfClientSolana(privateKey, rpcURL string, opts ...SurfClientOption) (*SurfClient, error) {
 	bc, err := newSolanaBaseClient(privateKey, "", rpcURL, DefaultTimeout)
 	if err != nil {

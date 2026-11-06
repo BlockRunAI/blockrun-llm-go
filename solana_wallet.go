@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/mr-tron/base58"
 )
@@ -45,11 +44,6 @@ const (
 	defaultComputeUnitLimit      = uint32(20000)
 	defaultComputeUnitPriceMicro = uint64(1)
 )
-
-// solanaPollResignInterval is how often an async poll loop re-signs the Solana
-// payment with a fresh blockhash. It must stay comfortably under a Solana
-// blockhash's ~60-90s lifetime so the settling poll's transaction is valid.
-const solanaPollResignInterval = 30 * time.Second
 
 // SolanaSessionFile is the legacy fallback path for a bare bs58 Solana key.
 func solanaSessionFile() string {

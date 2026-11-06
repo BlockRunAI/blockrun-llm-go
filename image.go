@@ -351,23 +351,24 @@ func (c *ImageClient) submitImageAndMaybePoll(ctx context.Context, endpoint stri
 		return nil, &PaymentError{Message: "Payment was rejected. Check your wallet balance."}
 	case http.StatusOK:
 		// Fast path: generated and settled inline.
-		c.recordSettledCost(paymentOption.Amount, endpoint)
+		c.recordPaidCall(resp2.Header, paymentOption.Amount, endpoint)
 		return decodeImageResponse(body2, resp2.Header)
 	case http.StatusAccepted:
 		// Slow path: async envelope — fall through to the poll loop below.
 	default:
 		return nil, &APIError{
 			StatusCode: resp2.StatusCode,
-			Message:    fmt.Sprintf("API error after payment: %s", string(body2)),
+			Message:    paidFailureMessage(resp2.Header, body2),
 		}
 	}
 
 	return c.pollImageJob(ctx, endpoint, body2, resp2.StatusCode, &imagePayment{
-		option:      paymentOption,
-		payload:     paymentPayload,
-		resourceURL: resourceURL,
-		description: paymentReq.Resource.Description,
-		extensions:  paymentReq.Extensions,
+		option:       paymentOption,
+		payload:      paymentPayload,
+		resourceURL:  resourceURL,
+		description:  paymentReq.Resource.Description,
+		extensions:   paymentReq.Extensions,
+		submitHeader: resp2.Header,
 	})
 }
 
@@ -380,6 +381,9 @@ type imagePayment struct {
 	resourceURL string
 	description string
 	extensions  map[string]any
+	// submitHeader is the paid POST's response headers, read when the POST is
+	// what settled (Solana image and music).
+	submitHeader http.Header
 }
 
 // pollImageJob GET-polls an async image job to a terminal state.
@@ -421,125 +425,19 @@ func (c *ImageClient) pollImageJob(
 		return resp, nil
 	}
 
-	var submitData struct {
-		ID      string `json:"id"`
-		PollURL string `json:"poll_url"`
-		Status  string `json:"status"`
+	body, header, err := c.pollAsyncJob(ctx, asyncJob{
+		label:        "Image generation",
+		endpoint:     endpoint,
+		submitBody:   submitBody,
+		submitStatus: submitStatus,
+		pay:          pay,
+		budget:       imagePollBudget,
+		interval:     c.pollInterval,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := json.Unmarshal(submitBody, &submitData); err != nil {
-		return nil, fmt.Errorf("failed to decode submit response: %w", err)
-	}
-	if submitData.ID == "" || submitData.PollURL == "" {
-		return nil, &APIError{
-			StatusCode: submitStatus,
-			Message:    fmt.Sprintf("submit response missing id/poll_url: %s", string(submitBody)),
-		}
-	}
-
-	pollURL, pollErr := c.resolvePollURL(submitData.PollURL)
-	if pollErr != nil {
-		return nil, pollErr
-	}
-
-	deadline := time.Now().Add(imagePollBudget)
-	lastStatus := submitData.Status
-	if lastStatus == "" {
-		lastStatus = "queued"
-	}
-	// Base reuses the submit signature across polls.
-	var pollSig string
-	if pay != nil {
-		pollSig = pay.payload
-	}
-	lastSigned := time.Now()
-
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(c.pollInterval):
-		}
-
-		pollReq, err := http.NewRequestWithContext(ctx, "GET", pollURL, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create poll request: %w", err)
-		}
-		if pay != nil {
-			pollSig, lastSigned = c.pollPaymentPayload(pollSig, lastSigned, pay.option, pay.resourceURL, pay.description, pay.extensions)
-			pollReq.Header.Set("PAYMENT-SIGNATURE", pollSig)
-		}
-		c.applyAuth(pollReq)
-		pollResp, err := c.httpClient.Do(pollReq)
-		if err != nil {
-			return nil, fmt.Errorf("poll request failed: %w", err)
-		}
-		pollBytes, _ := io.ReadAll(pollResp.Body)
-		pollResp.Body.Close()
-
-		if pollResp.StatusCode == http.StatusPaymentRequired && pay == nil {
-			return nil, apiKeyPaymentError(pollBytes)
-		}
-
-		var pollData map[string]any
-		_ = json.Unmarshal(pollBytes, &pollData)
-		if s, ok := pollData["status"].(string); ok && s != "" {
-			lastStatus = s
-		}
-
-		if pollResp.StatusCode == http.StatusAccepted && (lastStatus == "queued" || lastStatus == "in_progress") {
-			continue
-		}
-		if lastStatus == "failed" {
-			// The parenthetical is a wallet-rail fact: settlement waits for a
-			// completed poll, so a failed job costs nothing. Credit is taken at
-			// submit, so the account rail does not get to claim it.
-			note := " (no payment was taken)"
-			if pay == nil {
-				note = ""
-			}
-			return nil, &APIError{
-				StatusCode: pollResp.StatusCode,
-				Message:    fmt.Sprintf("Upstream generation failed%s: %s", note, string(pollBytes)),
-			}
-		}
-		// Terminal success is keyed on status, NOT the HTTP code — the
-		// gateway settles on-chain the moment a poll reports "completed", so
-		// the charge is irreversible at that point. Record the cost as soon
-		// as completion is observed, then decode.
-		if lastStatus == "completed" {
-			switch {
-			case pay != nil:
-				c.recordSettledCost(pay.option.Amount, endpoint)
-			default:
-				c.recordAPIKeyCost(pollBytes, endpoint)
-			}
-			return decodeImageResponse(pollBytes, pollResp.Header)
-		}
-		// 504 on a poll = transient upstream hiccup; keep polling. Any other
-		// non-2xx is a hard failure.
-		if pollResp.StatusCode != http.StatusOK &&
-			pollResp.StatusCode != http.StatusAccepted &&
-			pollResp.StatusCode != http.StatusGatewayTimeout {
-			return nil, &APIError{
-				StatusCode: pollResp.StatusCode,
-				Message:    fmt.Sprintf("Poll failed: %s", string(pollBytes)),
-			}
-		}
-	}
-
-	// Same caveat as the video poll: only the wallet rail defers settlement to
-	// the first completed poll, so only there is giving up free.
-	unpaid := " No payment was taken."
-	if pay == nil {
-		unpaid = ""
-	}
-	return nil, &APIError{
-		StatusCode: http.StatusGatewayTimeout,
-		Message: fmt.Sprintf(
-			"Image generation did not complete within %.0fs (last status: %s).%s",
-			imagePollBudget.Seconds(), lastStatus, unpaid,
-		),
-	}
+	return decodeImageResponse(body, header)
 }
 
 // decodeImageResponse unmarshals a gateway image payload (the synchronous

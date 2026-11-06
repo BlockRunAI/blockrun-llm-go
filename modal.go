@@ -3,9 +3,9 @@ package blockrun
 // Modal Sandbox — POST /v1/modal/{path}.
 //
 // Pay-per-call sandboxed cloud compute: create a sandbox, run commands,
-// tear it down. sandbox/create $0.01 (CPU; $0.05 with GPU); exec / status /
-// terminate $0.001 each. Methods live on *LLMClient and pay automatically
-// via x402.
+// tear it down. sandbox/create is priced by the requested size, quoted in the
+// 402 (live prices: https://blockrun.ai/models); exec / status / terminate are a
+// small flat price. Methods live on *LLMClient and pay automatically via x402.
 
 import (
 	"context"

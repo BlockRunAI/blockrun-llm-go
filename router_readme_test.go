@@ -16,7 +16,7 @@ var retiredRoutingIDs = []string{
 	"nvidia/deepseek-v4-flash",
 	"nvidia/llama-4-maverick",
 	"nvidia/qwen3-coder-480b",
-	"nvidia/nemotron-3-super-120b", // hidden:true; gateway-internal cascade rung
+	"nvidia/nemotron-3-super-120b", // the gateway's cascade rung; the free table does not name it
 	"moonshot/kimi-k2.5",           // hidden
 	"moonshot/kimi-k2.6",           // hidden
 	"moonshot/kimi-k2.7",           // hidden
