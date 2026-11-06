@@ -469,10 +469,12 @@ func TestPollAsyncJob_StopsWhenFailed(t *testing.T) {
 		name, body string
 		code       int
 		want       string
+		booked     bool
 	}{
-		{"unknown money", `{"status":"failed","payment_status":"unknown"}`, 200, "check your wallet"},
-		{"settled, undeliverable 502 stops at once", `{"status":"failed","payment_status":"settled"}`, 502, "payment was taken"},
-		{"no status means the wallet rail's rule", `{"status":"failed"}`, 200, "no payment was taken"},
+		{"unknown money", `{"status":"failed","payment_status":"unknown"}`, 200, "check your wallet", false},
+		{"settled, undeliverable 502 stops at once and books", `{"status":"failed","payment_status":"settled"}`, 502, "payment was taken", true},
+		{"a payment block counts too", `{"status":"failed","payment":{"status":"already_settled"}}`, 502, "do not pay again", true},
+		{"no status means the wallet rail's rule", `{"status":"failed"}`, 200, "no payment was taken", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -487,6 +489,7 @@ func TestPollAsyncJob_StopsWhenFailed(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			c.costLog = nil
 			_, _, err = c.pollAsyncJob(context.Background(), asyncJob{
 				label: "x", endpoint: "/v1/x", submitBody: []byte(`{"id":"j","poll_url":"` + srv.URL + `/j"}`),
 				pay: &imagePayment{option: &PaymentOption{Amount: "1"}, payload: "sig"}, budget: 2 * time.Second, interval: time.Millisecond,
@@ -496,6 +499,13 @@ func TestPollAsyncJob_StopsWhenFailed(t *testing.T) {
 			}
 			if polls.Load() != 1 {
 				t.Errorf("%d polls, want 1", polls.Load())
+			}
+			wantCalls := 0
+			if tc.booked {
+				wantCalls = 1
+			}
+			if got := c.GetSpending(); got.Calls != wantCalls {
+				t.Errorf("spending = %+v, want %d booked", got, wantCalls)
 			}
 		})
 	}
@@ -837,6 +847,18 @@ func TestPollAsyncJob_SettlingIsNeverReportedAsFree(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
+	t.Run("a proxy's bare 502 then pending", func(t *testing.T) {
+		err := run(t, plainSubmit, func(n int32, w http.ResponseWriter) {
+			if n == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			pending(w)
+		})
+		if err == nil || !strings.Contains(err.Error(), "may have been taken") {
+			t.Errorf("err = %v", err)
+		}
+	})
 	t.Run("in doubt at submit", func(t *testing.T) {
 		err := run(t, `{"id":"j","poll_url":"POLL","payment_status":"settled_optimistic"}`, func(_ int32, w http.ResponseWriter) { pending(w) })
 		if err == nil || !strings.Contains(err.Error(), "may have been taken") {
@@ -911,5 +933,32 @@ func TestSolanaVideo_FailingPaidPollsStopSigning(t *testing.T) {
 		if paid.Load() != solanaMaxPaidPollRefusals {
 			t.Errorf("status %d: %d payments signed, want %d", status, paid.Load(), solanaMaxPaidPollRefusals)
 		}
+	}
+}
+
+func TestPollAsyncJob_CancelKeepsTheMoneyNote(t *testing.T) {
+	var polls atomic.Int32
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		polls.Add(1)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"status":"in_progress","payment_status":"settling"}`)
+		cancel()
+	}))
+	defer srv.Close()
+	c, err := NewVideoClient(testPrivateKey, WithVideoAPIURL(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = c.pollAsyncJob(ctx, asyncJob{
+		label: "x", endpoint: "/v1/x", submitBody: []byte(`{"id":"j","poll_url":"` + srv.URL + `/j"}`),
+		pay: &imagePayment{option: &PaymentOption{Amount: "1"}, payload: "sig"}, budget: 5 * time.Second, interval: time.Millisecond,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want it to wrap context.Canceled", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "may have been taken") {
+		t.Errorf("err = %v", err)
 	}
 }

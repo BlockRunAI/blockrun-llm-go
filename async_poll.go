@@ -72,7 +72,7 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
-			return nil, nil, ctx.Err()
+			return nil, nil, fmt.Errorf("%s polling stopped: %w.%s", job.label, ctx.Err(), job.givingUpNote(pollURL, inDoubt))
 		case <-time.After(wait):
 		}
 		wait = job.interval
@@ -93,10 +93,11 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 			resp.Body.Close()
 		}
 		if err != nil {
-			if ctx.Err() != nil {
-				return nil, nil, ctx.Err()
-			}
+			// The paid poll may have reached the gateway, cancelled or not.
 			inDoubt = true
+			if ctx.Err() != nil {
+				return nil, nil, fmt.Errorf("%s polling stopped: %w.%s", job.label, ctx.Err(), job.givingUpNote(pollURL, inDoubt))
+			}
 			failures++
 			if failures >= solanaMaxPollTransportErrors {
 				return nil, nil, fmt.Errorf("poll request failed %d times in a row: %w.%s", failures, err, job.givingUpNote(pollURL, true))
@@ -116,7 +117,10 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 		if s, ok := data["status"].(string); ok && s != "" {
 			lastStatus = s
 		}
-		if s, _ := data["payment_status"].(string); paymentInDoubt(s) {
+		// A 5xx with no payment_status may be a proxy's, in front of a poll that
+		// settled.
+		status, hasStatus := data["payment_status"].(string)
+		if paymentInDoubt(status) || (resp.StatusCode >= 500 && !hasStatus) {
 			inDoubt = true
 		}
 
@@ -127,6 +131,9 @@ func (bc *baseClient) pollAsyncJob(ctx context.Context, job asyncJob) ([]byte, h
 			fallback := ""
 			if job.pay != nil && !inDoubt {
 				fallback = " (no payment was taken)"
+			}
+			if job.pay != nil && jobReportsSettled(body) {
+				bc.recordPaidCall(resp.Header, job.pay.option.Amount, job.endpoint)
 			}
 			return nil, nil, &APIError{
 				StatusCode: resp.StatusCode,

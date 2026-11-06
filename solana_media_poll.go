@@ -519,18 +519,9 @@ func (c *VideoClient) followSolanaVideoJob(ctx context.Context, endpoint string,
 	failed := func(resp *http.Response, body []byte) error {
 		// A clip that settled and then could not be delivered answers 502 with
 		// payment.status set. The money moved, so it is booked.
-		var fields struct {
-			Payment struct {
-				Status string `json:"status"`
-			} `json:"payment"`
-		}
-		_ = json.Unmarshal(body, &fields)
 		note := jobFailureNote(body, " (no payment was taken)")
-		if fields.Payment.Status == "settled" || fields.Payment.Status == "already_settled" {
-			note = " (payment was taken; do not pay again)"
-			if paidAmount != "" {
-				c.recordPaidCall(resp.Header, paidAmount, endpoint)
-			}
+		if jobReportsSettled(body) && paidAmount != "" {
+			c.recordPaidCall(resp.Header, paidAmount, endpoint)
 		}
 		return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("Upstream generation failed%s: %s", note, string(body))}
 	}

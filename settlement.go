@@ -158,10 +158,32 @@ func paidFailureMessage(h http.Header, body []byte) string {
 	return fmt.Sprintf("API error on the paid request (no settlement reported; a failed call usually moves no funds, but settlement can land after the error, so check your wallet before assuming nothing was charged): %s", text)
 }
 
+// jobReportsSettled reports whether a failed job's body says the payment settled:
+// payment_status, or the payment block on a clip that settled but could not be
+// delivered.
+func jobReportsSettled(body []byte) bool {
+	var fields struct {
+		PaymentStatus string `json:"payment_status"`
+		Payment       struct {
+			Status string `json:"status"`
+		} `json:"payment"`
+	}
+	_ = json.Unmarshal(body, &fields)
+	for _, status := range []string{fields.PaymentStatus, fields.Payment.Status} {
+		if status == "settled" || status == "already_settled" {
+			return true
+		}
+	}
+	return false
+}
+
 // jobFailureNote is the parenthetical for a media job that ended in failed.
-// A payment_status in the body wins. Without one, fallback is what this rail's
-// contract implies.
+// What the body says about the payment wins. Without that, fallback is what this
+// rail's contract implies.
 func jobFailureNote(body []byte, fallback string) string {
+	if jobReportsSettled(body) {
+		return " (payment was taken; do not pay again)"
+	}
 	var fields struct {
 		PaymentStatus string `json:"payment_status"`
 	}
@@ -171,7 +193,7 @@ func jobFailureNote(body []byte, fallback string) string {
 		return fallback
 	case "not_charged":
 		return " (no payment was taken)"
-	case "settled", "settled_optimistic":
+	case "settled_optimistic":
 		return " (payment was taken)"
 	}
 	return fmt.Sprintf(" (payment status %s; check your wallet before paying again)", fields.PaymentStatus)
