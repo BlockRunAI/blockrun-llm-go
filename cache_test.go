@@ -195,4 +195,3 @@ func TestCacheGetWithNilBody(t *testing.T) {
 func formatFloat(f float64) string {
 	return fmt.Sprintf("%.6f", f)
 }
-
