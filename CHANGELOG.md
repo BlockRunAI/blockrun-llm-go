@@ -2,7 +2,7 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
-## Unreleased
+## 0.24.0
 
 Catches up with `@blockrun/llm` 3.26.1, `blockrun-llm` 1.21.3 and the current
 sol.blockrun.ai contract.
