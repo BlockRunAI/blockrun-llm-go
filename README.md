@@ -599,7 +599,8 @@ if len(result.Choices[0].Message.ToolCalls) > 0 {
 // Simple search
 result, err := client.Search(ctx, "latest AI news", nil)
 fmt.Println(result.Summary)
-fmt.Println(result.Citations)
+fmt.Println(result.Citations)       // URLs
+fmt.Println(result.CitationSources) // URLs with titles
 
 // With options
 result, err := client.Search(ctx, "Go 1.23 features", &blockrun.SearchOptions{

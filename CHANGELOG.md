@@ -9,6 +9,10 @@ sol.blockrun.ai contract.
 
 ### Fixed: payments and spend
 
+- **`Search` no longer fails after the charge.** Both gateways send `citations` as
+  `{url, title}` objects, and `SearchResult.Citations []string` could not decode
+  them, so every paid search returned an error once the money had moved.
+  `Citations` keeps the URLs; the new `CitationSources` adds titles.
 - **A paid call the gateway did not settle books $0.** Any `X-Settlement-Skipped`
   or `X-Payment-Waived` (`free-fallback`, `empty-result`, `unexecuted`, later
   reasons) now keeps the call out of `GetSpending` and the cost log, on chat,

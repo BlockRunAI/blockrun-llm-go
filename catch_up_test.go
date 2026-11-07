@@ -962,3 +962,32 @@ func TestPollAsyncJob_CancelKeepsTheMoneyNote(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// The live gateways send citations as objects. []string failed every paid search
+// at decode, after the charge, and no mock had the real shape.
+func TestSearchResult_DecodesEveryCitationShape(t *testing.T) {
+	var r SearchResult
+	err := json.Unmarshal([]byte(`{"query":"q","summary":"s","sources_used":3,"model":"xai/grok-4.3","citations":[
+		{"url":"https://a.example/1","title":"A"},
+		"https://b.example/2",
+		{"title":"no url"},
+		42
+	]}`), &r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Summary != "s" || r.SourcesUsed != 3 || r.Model != "xai/grok-4.3" {
+		t.Errorf("result = %+v", r)
+	}
+	if len(r.Citations) != 2 || r.Citations[0] != "https://a.example/1" || r.Citations[1] != "https://b.example/2" {
+		t.Errorf("Citations = %v", r.Citations)
+	}
+	if r.CitationSources[0].Title != "A" {
+		t.Errorf("CitationSources = %+v", r.CitationSources)
+	}
+
+	var none SearchResult
+	if err := json.Unmarshal([]byte(`{"query":"q","summary":"s","sources_used":0}`), &none); err != nil || none.Citations != nil {
+		t.Errorf("no citations: %+v, %v", none, err)
+	}
+}
