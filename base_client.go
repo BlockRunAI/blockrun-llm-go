@@ -48,6 +48,13 @@ type baseClient struct {
 	solanaRPCURL string
 }
 
+// jobPollBudget and jobPollInterval bound a job that answers 202 to a plain
+// POST (music on Base and the account rail). Image and video set their own.
+var (
+	jobPollBudget   = 300 * time.Second
+	jobPollInterval = 3 * time.Second
+)
+
 // chainSolana and chainBase identify the two payment chains this SDK signs for.
 const (
 	chainSolana = "solana"
@@ -71,6 +78,18 @@ func (bc *baseClient) resolvedChain() string {
 // client a Base option whenever a gateway lists Base first, and vice versa.
 func (bc *baseClient) extractPaymentDetails(req *PaymentRequirement) (*PaymentOption, error) {
 	return ExtractPaymentDetailsForChain(req, bc.resolvedChain())
+}
+
+// requireBaseGateway refuses a family sol.blockrun.ai does not serve. Those routes
+// answer the gateway's HTML 404 there, which says nothing about why.
+func (bc *baseClient) requireBaseGateway(family string) error {
+	if !bc.isSolana() {
+		return nil
+	}
+	return &ValidationError{
+		Field:   "client",
+		Message: family + " is not served by the Solana gateway. Use NewLLMClient (Base) or an API key for this call.",
+	}
 }
 
 // hasWallet reports whether a signing key is configured for the resolved chain.
@@ -239,36 +258,6 @@ func (bc *baseClient) checkEnvAPIURL() {
 	}
 }
 
-// pollPaymentPayload returns the PAYMENT-SIGNATURE to attach to an async poll.
-//
-// Base reuses the submit-time signature: its EIP-712 authorization window
-// (validBefore = now + maxTimeout, floored at the client's poll budget) covers
-// the whole poll loop, and the gateway binds by wallet, not signature equality.
-//
-// Solana MUST re-sign periodically: a Solana transaction is pinned to a recent
-// blockhash that expires within ~1-2 minutes, so the submit-time transaction
-// would fail simulation by the time a slow job completes. It re-signs (fresh
-// blockhash) once the current signature is older than solanaPollResignInterval,
-// well inside the blockhash lifetime; the gateway settles the transaction
-// attached to the poll that first observes completion, so that settling
-// transaction is always fresh. On a re-sign error the current payload is kept so
-// the poll still surfaces a meaningful gateway error rather than a local one.
-//
-// Returns the payload to use and the (possibly updated) last-signed time.
-func (bc *baseClient) pollPaymentPayload(current string, lastSigned time.Time, option *PaymentOption, resourceURL, description string, extensions map[string]any) (string, time.Time) {
-	if !bc.isSolana() || time.Since(lastSigned) < solanaPollResignInterval {
-		return current, lastSigned
-	}
-	// allowServerBlockhash=false: the 402's extra.recentBlockhash is pinned to
-	// submit time, so reusing it here would re-sign with the same expiring hash
-	// and defeat the re-sign. Force a fresh one.
-	fresh, err := bc.signPayment(option, resourceURL, description, extensions, false)
-	if err != nil {
-		return current, lastSigned
-	}
-	return fresh, time.Now()
-}
-
 // createPaymentPayload signs an x402 payment for the resolved chain. Base uses
 // EIP-712 (secp256k1); Solana uses the SVM exact scheme (ed25519). This is the
 // single signing entry point shared by every payment retry path.
@@ -383,6 +372,24 @@ func (bc *baseClient) doRequestHeaders(ctx context.Context, endpoint string, bod
 			return nil, nil, apiKeyPaymentError(refusal)
 		}
 		return bc.handlePaymentAndRetryHeaders(ctx, url, jsonBody, resp)
+	}
+
+	// Account rail: the key is the payment, so a slow job (music) answers 202
+	// { id, poll_url } to the first POST, already billed. It is followed here;
+	// reading it as an error would invite a retry that bills again.
+	if resp.StatusCode == http.StatusAccepted && bc.isAPIKey() {
+		submitBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read response: %w", err)
+		}
+		return bc.pollAsyncJob(ctx, asyncJob{
+			label:        "Generation",
+			endpoint:     endpoint,
+			submitBody:   submitBody,
+			submitStatus: resp.StatusCode,
+			budget:       jobPollBudget,
+			interval:     jobPollInterval,
+		})
 	}
 
 	// Handle other errors
@@ -578,7 +585,7 @@ func (bc *baseClient) handleGetPaymentAndRetry(ctx context.Context, url string, 
 
 	retryResp, err := bc.httpClient.Do(retryReq)
 	if err != nil {
-		return nil, fmt.Errorf("retry request failed: %w", err)
+		return nil, fmt.Errorf("paid request failed in transit, so the payment may have settled; check your wallet before retrying: %w", err)
 	}
 	defer retryResp.Body.Close()
 
@@ -589,7 +596,7 @@ func (bc *baseClient) handleGetPaymentAndRetry(ctx context.Context, url string, 
 		bodyBytes, _ := io.ReadAll(retryResp.Body)
 		return nil, &APIError{
 			StatusCode: retryResp.StatusCode,
-			Message:    fmt.Sprintf("API error after payment: %s", string(bodyBytes)),
+			Message:    paidFailureMessage(retryResp.Header, bodyBytes),
 		}
 	}
 
@@ -598,25 +605,11 @@ func (bc *baseClient) handleGetPaymentAndRetry(ctx context.Context, url string, 
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	bc.mu.Lock()
-	bc.sessionCalls++
-	var costUSD float64
-	if amountStr := paymentOption.Amount; amountStr != "" {
-		var amountMicro float64
-		if _, err := fmt.Sscanf(amountStr, "%f", &amountMicro); err == nil {
-			costUSD = amountMicro / 1_000_000
-			bc.sessionTotalUSD += costUSD
-		}
+	endpoint := strings.TrimPrefix(url, bc.apiURL)
+	if idx := strings.Index(endpoint, "?"); idx != -1 {
+		endpoint = endpoint[:idx]
 	}
-	bc.mu.Unlock()
-
-	if bc.costLog != nil && costUSD > 0 {
-		endpoint := strings.TrimPrefix(url, bc.apiURL)
-		if idx := strings.Index(endpoint, "?"); idx != -1 {
-			endpoint = endpoint[:idx]
-		}
-		bc.costLog.Append(endpoint, costUSD)
-	}
+	bc.recordPaidCall(retryResp.Header, paymentOption.Amount, endpoint)
 
 	return respBytes, nil
 }
@@ -734,7 +727,7 @@ func (bc *baseClient) handlePaymentAndRetryHeaders(ctx context.Context, url stri
 
 	retryResp, err := bc.httpClient.Do(retryReq)
 	if err != nil {
-		return nil, nil, fmt.Errorf("retry request failed: %w", err)
+		return nil, nil, fmt.Errorf("paid request failed in transit, so the payment may have settled; check your wallet before retrying: %w", err)
 	}
 	defer retryResp.Body.Close()
 
@@ -743,12 +736,33 @@ func (bc *baseClient) handlePaymentAndRetryHeaders(ctx context.Context, url stri
 		return nil, nil, &PaymentError{Message: "Payment was rejected. Check your wallet balance."}
 	}
 
+	endpoint := strings.TrimPrefix(url, bc.apiURL)
+
+	// A slow job on the Base wallet rail: the gateway took the payment header
+	// without settling and answers 202 { id, poll_url }. It settles on the first
+	// completed poll, so the job is followed rather than reported as an error.
+	if retryResp.StatusCode == http.StatusAccepted && !bc.isSolana() {
+		submitBody, err := io.ReadAll(retryResp.Body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read response: %w", err)
+		}
+		return bc.pollAsyncJob(ctx, asyncJob{
+			label:        "Generation",
+			endpoint:     endpoint,
+			submitBody:   submitBody,
+			submitStatus: retryResp.StatusCode,
+			pay:          &imagePayment{option: paymentOption, payload: paymentPayload},
+			budget:       jobPollBudget,
+			interval:     jobPollInterval,
+		})
+	}
+
 	// Handle other errors
 	if retryResp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(retryResp.Body)
 		return nil, nil, &APIError{
 			StatusCode: retryResp.StatusCode,
-			Message:    fmt.Sprintf("API error after payment: %s", string(bodyBytes)),
+			Message:    paidFailureMessage(retryResp.Header, bodyBytes),
 		}
 	}
 
@@ -758,32 +772,14 @@ func (bc *baseClient) handlePaymentAndRetryHeaders(ctx context.Context, url stri
 		return nil, nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Track spending - convert amount from micro-USDC to USD
-	bc.mu.Lock()
-	bc.sessionCalls++
-	var costUSD float64
-	if amountStr := paymentOption.Amount; amountStr != "" {
-		var amountMicro float64
-		if _, err := fmt.Sscanf(amountStr, "%f", &amountMicro); err == nil {
-			costUSD = amountMicro / 1_000_000
-			bc.sessionTotalUSD += costUSD
-		}
-	}
-	bc.mu.Unlock()
-
-	// Log cost to persistent JSONL file
-	if bc.costLog != nil && costUSD > 0 {
-		endpoint := strings.TrimPrefix(url, bc.apiURL)
-		bc.costLog.Append(endpoint, costUSD)
-	}
+	bc.recordPaidCall(retryResp.Header, paymentOption.Amount, endpoint)
 
 	return respBytes, retryResp.Header, nil
 }
 
-// recordSettledCost tracks spending for a paid call whose settlement happens
-// outside handlePaymentAndRetryHeaders — the async submit→poll flows (video,
-// slow-path images), which charge only once a poll observes "completed". It
-// mirrors the session accounting and JSONL cost log of the synchronous path.
+// recordSettledCost books one settled payment. It
+// is the single place a settled wallet payment reaches the session total and the
+// JSONL cost log; recordPaidCall gates it on the gateway's skip headers.
 func (bc *baseClient) recordSettledCost(amount, endpoint string) {
 	var costUSD float64
 	if amount != "" {

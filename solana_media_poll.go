@@ -181,7 +181,15 @@ func (bc *baseClient) pollSolanaPaidJob(ctx context.Context, job *solanaPaidJob)
 			lastStatus = s
 		}
 
-		if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		// A status of failed is final at any HTTP code: a paid job the gateway could
+		// not deliver answers 502 and asks the caller to stop.
+		if lastStatus == "failed" {
+			return nil, nil, &APIError{
+				StatusCode: resp.StatusCode,
+				Message:    fmt.Sprintf("Upstream generation failed%s: %s", jobFailureNote(body, " (payment was settled at submit)"), string(body)),
+			}
+		}
+		if isPollNotYet(resp.StatusCode) {
 			wait = pollRetryAfter(resp.Header, job.interval)
 			continue
 		}
@@ -200,18 +208,12 @@ func (bc *baseClient) pollSolanaPaidJob(ctx context.Context, job *solanaPaidJob)
 			wait = pollRetryAfter(resp.Header, job.interval)
 			continue
 		}
-		if resp.StatusCode == http.StatusAccepted && (lastStatus == "queued" || lastStatus == "in_progress") {
+		if isCompletedPoll(resp.StatusCode, lastStatus, data) {
+			return body, resp.Header, nil
+		}
+		if resp.StatusCode == http.StatusAccepted {
 			wait = pollRetryAfter(resp.Header, job.interval)
 			continue
-		}
-		if lastStatus == "failed" {
-			return nil, nil, &APIError{
-				StatusCode: resp.StatusCode,
-				Message:    fmt.Sprintf("Upstream generation failed (payment was settled at submit): %s", string(body)),
-			}
-		}
-		if lastStatus == "completed" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return body, resp.Header, nil
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, nil, &APIError{
@@ -231,10 +233,16 @@ func (bc *baseClient) pollSolanaPaidJob(ctx context.Context, job *solanaPaidJob)
 	}
 }
 
+// isPollNotYet is a poll answer that means "ask again" and never counts against
+// the job: the gateway's 503 with Retry-After, and an edge's 502 or 504.
+func isPollNotYet(status int) bool {
+	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+}
+
 // isCountedPollFailure is a poll answer that is retried but counts toward
-// solanaMaxPollTransportErrors: a 5xx other than 503/504 ("not yet"), or 429.
+// solanaMaxPollTransportErrors: any other 5xx, or a 429.
 func isCountedPollFailure(status int) bool {
-	if status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout {
+	if isPollNotYet(status) {
 		return false
 	}
 	return status >= 500 || status == http.StatusTooManyRequests
@@ -276,9 +284,9 @@ func (bc *baseClient) solanaPaidMediaPost(
 	budget, interval time.Duration,
 ) (respBody []byte, paid bool, err error) {
 	submitURL := bc.apiURL + endpoint
-	jsonBody, mErr := json.Marshal(body)
+	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to encode request body: %w", mErr)
+		return nil, false, fmt.Errorf("failed to encode request body: %w", err)
 	}
 
 	req1, err := http.NewRequestWithContext(ctx, http.MethodPost, submitURL, bytes.NewReader(jsonBody))
@@ -340,7 +348,7 @@ func (bc *baseClient) solanaPaidMediaPost(
 	resp2.Body.Close()
 	if readErr != nil && (resp2.StatusCode == http.StatusOK || resp2.StatusCode == http.StatusAccepted) {
 		// Accepted means paid; only the answer was lost.
-		bc.recordSettledCost(paymentOption.Amount, endpoint)
+		bc.recordPaidCall(resp2.Header, paymentOption.Amount, endpoint)
 		return nil, true, fmt.Errorf("%s was paid but its response was cut off: %w. Payment was settled at submit; check your wallet before submitting again", label, readErr)
 	}
 
@@ -348,23 +356,24 @@ func (bc *baseClient) solanaPaidMediaPost(
 	case http.StatusPaymentRequired:
 		return nil, false, &PaymentError{Message: "Payment was rejected. Check your wallet balance."}
 	case http.StatusOK:
-		bc.recordSettledCost(paymentOption.Amount, endpoint)
+		bc.recordPaidCall(resp2.Header, paymentOption.Amount, endpoint)
 		return body2, true, nil
 	case http.StatusAccepted:
 		// Paid and detached: followSolanaPaidSubmit books it, then follows it.
 	default:
 		return nil, false, &APIError{
 			StatusCode: resp2.StatusCode,
-			Message:    fmt.Sprintf("API error after payment: %s", string(body2)),
+			Message:    paidFailureMessage(resp2.Header, body2),
 		}
 	}
 
 	result, _, _, err := bc.followSolanaPaidSubmit(ctx, kind, label, endpoint, body2, resp2.StatusCode, &imagePayment{
-		option:      paymentOption,
-		payload:     paymentPayload,
-		resourceURL: resourceURL,
-		description: paymentReq.Resource.Description,
-		extensions:  paymentReq.Extensions,
+		option:       paymentOption,
+		payload:      paymentPayload,
+		resourceURL:  resourceURL,
+		description:  paymentReq.Resource.Description,
+		extensions:   paymentReq.Extensions,
+		submitHeader: resp2.Header,
 	}, budget, interval)
 	return result, true, err
 }
@@ -384,7 +393,7 @@ func (bc *baseClient) followSolanaPaidSubmit(
 	pay *imagePayment,
 	budget, interval time.Duration,
 ) ([]byte, http.Header, string, error) {
-	bc.recordSettledCost(pay.option.Amount, endpoint)
+	bc.recordPaidCall(pay.submitHeader, pay.option.Amount, endpoint)
 	if interval <= 0 {
 		interval = musicPollInterval
 	}
@@ -419,4 +428,280 @@ func (bc *baseClient) followSolanaPaidSubmit(
 	job.pollURL = pollURL
 	body, header, err := bc.pollSolanaPaidJob(ctx, job)
 	return body, header, job.paidNote(), err
+}
+
+// solanaMaxPaidPollRefusals bounds the payments signed for one finished video that
+// were not refused outright: a 402 (settlement held by another poll, outcome
+// unknown, a stale blockhash at settle), a 5xx or 429, or a lost answer. The next
+// poll reads the job's settlement record.
+const solanaMaxPaidPollRefusals = 4
+
+// followSolanaVideoJob follows a Solana video job. The submit only verified the
+// payment, so nothing is charged until the job finishes, and a failed job is
+// never charged.
+//
+// Each poll carries an ownership proof, which is read-only. A finished, unpaid
+// job answers the proof with 402 { status: completed } and an x402 challenge;
+// ONE payment is signed from it and the poll is re-sent with it. That is the only
+// payment a job normally sees. Paying on every poll is wrong here: if the
+// gateway's settlement record is unreachable, a fresh payment on a re-poll can
+// charge again, while a proof poll answers 503.
+//
+// A gateway that refuses the proof (video answers 400, its "no such job") or
+// challenges a job that is not finished gets the old flow for the rest of this
+// job: an unpaid GET for a fresh challenge, then a payment the gateway only
+// verifies until the job completes.
+func (c *VideoClient) followSolanaVideoJob(ctx context.Context, endpoint string, submitBody []byte, submitStatus int, pay *imagePayment) (*VideoResponse, error) {
+	var submitted struct {
+		ID      string `json:"id"`
+		PollURL string `json:"poll_url"`
+		Status  string `json:"status"`
+	}
+	if err := json.Unmarshal(submitBody, &submitted); err != nil {
+		return nil, fmt.Errorf("failed to decode submit response: %w", err)
+	}
+	if submitted.ID == "" || submitted.PollURL == "" {
+		return nil, &APIError{StatusCode: submitStatus, Message: fmt.Sprintf("submit response missing id/poll_url: %s", string(submitBody))}
+	}
+	pollURL, err := c.resolvePollURL(submitted.PollURL)
+	if err != nil {
+		return nil, err
+	}
+	priv, err := solanaKeypair(c.solanaKey)
+	if err != nil {
+		return nil, fmt.Errorf("cannot sign the poll-ownership proof: %w", err)
+	}
+	jobID := pollJobID(pollURL, submitted.ID)
+
+	lastStatus := submitted.Status
+	if lastStatus == "" {
+		lastStatus = "queued"
+	}
+	interval := c.pollInterval
+	if interval <= 0 {
+		interval = videoPollInterval
+	}
+
+	proofPolls := true
+	wait := interval
+	failures := 0
+	refusalsLeft := solanaMaxPaidPollRefusals
+	// paidAmount is the amount last signed for this job; "" until one is sent.
+	paidAmount := ""
+
+	resumeNote := func() string {
+		if paidAmount == "" {
+			return "No payment was taken."
+		}
+		return fmt.Sprintf("A payment was sent and may have settled: resume by polling %s with the same wallet before submitting again.", pollURL)
+	}
+	get := func(sign func(*http.Request)) (*http.Response, []byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		sign(req)
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		return resp, body, err
+	}
+	deliver := func(resp *http.Response, body []byte) (*VideoResponse, error) {
+		// A job that read as settled on an earlier call books nothing here.
+		if paidAmount != "" {
+			c.recordPaidCall(resp.Header, paidAmount, endpoint)
+		}
+		return decodeVideoResponse(body, resp.Header)
+	}
+	failed := func(resp *http.Response, body []byte) error {
+		// A clip that settled and then could not be delivered answers 502 with
+		// payment.status set. The money moved, so it is booked.
+		note := jobFailureNote(body, " (no payment was taken)")
+		if jobReportsSettled(body) && paidAmount != "" {
+			c.recordPaidCall(resp.Header, paidAmount, endpoint)
+		}
+		return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("Upstream generation failed%s: %s", note, string(body))}
+	}
+
+	deadline := time.Now().Add(videoPollBudget)
+	for time.Now().Before(deadline) {
+		if wait > 0 {
+			if remaining := time.Until(deadline); wait > remaining {
+				wait = remaining
+			}
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("video polling stopped: %w. %s", ctx.Err(), resumeNote())
+			case <-time.After(wait):
+			}
+		}
+		wait = interval
+
+		// challenge is the 402 this poll pays against, when it pays at all.
+		var challengeHeader http.Header
+		var challengeBody []byte
+
+		resp, body, err := get(func(req *http.Request) {
+			if proofPolls {
+				for k, v := range pollAuthHeaders(priv, pollKindVideo, jobID, time.Now()) {
+					req.Header.Set(k, v)
+				}
+			}
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("video polling stopped: %w. %s", ctx.Err(), resumeNote())
+			}
+			failures++
+			if failures >= solanaMaxPollTransportErrors {
+				return nil, fmt.Errorf("video poll failed %d times in a row: %w. %s", failures, err, resumeNote())
+			}
+			continue
+		}
+		if !isCountedPollFailure(resp.StatusCode) {
+			failures = 0
+		}
+
+		var data struct {
+			Status string `json:"status"`
+			Error  any    `json:"error"`
+		}
+		_ = json.Unmarshal(body, &data)
+		if data.Status != "" {
+			lastStatus = data.Status
+		}
+
+		switch {
+		case lastStatus == "failed":
+			return nil, failed(resp, body)
+		case resp.StatusCode == http.StatusPaymentRequired:
+			if proofPolls && data.Status != "completed" {
+				proofPolls = false
+				wait = 0
+				log.Printf("blockrun: video job %s: the gateway answered the poll-ownership proof with a payment challenge; falling back to pay-per-poll for this job", submitted.ID)
+				continue
+			}
+			challengeHeader, challengeBody = resp.Header, body
+		case proofPolls && resp.StatusCode == http.StatusBadRequest:
+			proofPolls = false
+			wait = 0
+			log.Printf("blockrun: video job %s: the gateway refused the poll-ownership proof (HTTP 400); falling back to pay-per-poll for this job", submitted.ID)
+			continue
+		case resp.StatusCode == http.StatusOK && lastStatus == "completed":
+			return deliver(resp, body)
+		case resp.StatusCode == http.StatusAccepted || isPollNotYet(resp.StatusCode):
+			wait = pollRetryAfter(resp.Header, interval)
+			continue
+		case isCountedPollFailure(resp.StatusCode):
+			failures++
+			if failures >= solanaMaxPollTransportErrors {
+				return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("Poll failed %d times in a row: %s. %s", failures, string(body), resumeNote())}
+			}
+			wait = pollRetryAfter(resp.Header, interval)
+			continue
+		case resp.StatusCode == http.StatusOK:
+			continue
+		default:
+			return nil, &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("Poll failed: %s. %s", string(body), resumeNote())}
+		}
+
+		// Pay from this challenge: one payment, on a fresh blockhash.
+		payload, option, err := c.signFromChallenge(challengeHeader, challengeBody, pollURL, pay)
+		if err != nil {
+			return nil, &PaymentError{Message: fmt.Sprintf("Failed to pay for the finished video: %v. %s", err, resumeNote())}
+		}
+		paidAmount = option.Amount
+
+		paidResp, paidBody, err := get(func(req *http.Request) { req.Header.Set("PAYMENT-SIGNATURE", payload) })
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("video polling stopped: %w. %s", ctx.Err(), resumeNote())
+			}
+			// Only the answer may be lost. The next poll reads the settlement record.
+			refusalsLeft--
+			if refusalsLeft <= 0 {
+				return nil, &PaymentError{Message: fmt.Sprintf("Paid video poll failed in transit: %v. %s", err, resumeNote())}
+			}
+			continue
+		}
+		var paid struct {
+			Status string `json:"status"`
+			Error  any    `json:"error"`
+		}
+		_ = json.Unmarshal(paidBody, &paid)
+		if paid.Status != "" {
+			lastStatus = paid.Status
+		}
+
+		switch {
+		case lastStatus == "failed":
+			return nil, failed(paidResp, paidBody)
+		case paidResp.StatusCode == http.StatusOK && lastStatus == "completed":
+			return deliver(paidResp, paidBody)
+		case paidResp.StatusCode == http.StatusPaymentRequired:
+			if paid.Error == "Payment verification failed" && !strings.Contains(strings.ToLower(string(paidBody)), "blockhash") {
+				// Refused at verification: settlement never ran.
+				return nil, &PaymentError{Message: fmt.Sprintf("Payment for the finished video was rejected. Check your Solana USDC balance, then resume by polling %s with the same wallet.", pollURL)}
+			}
+			refusalsLeft--
+			if refusalsLeft <= 0 {
+				return nil, &PaymentError{Message: fmt.Sprintf("Payment for the finished video did not settle after %d attempts: %s. %s", solanaMaxPaidPollRefusals, strings.TrimSpace(string(paidBody)), resumeNote())}
+			}
+			wait = pollRetryAfter(paidResp.Header, interval)
+		case paidResp.StatusCode == http.StatusAccepted:
+			wait = pollRetryAfter(paidResp.Header, interval)
+		case isPollNotYet(paidResp.StatusCode) || isCountedPollFailure(paidResp.StatusCode):
+			// The proof poll before the next attempt answers normally, so only this
+			// count can stop a run of failing payments from signing to the deadline.
+			refusalsLeft--
+			if refusalsLeft <= 0 {
+				return nil, &APIError{StatusCode: paidResp.StatusCode, Message: fmt.Sprintf("Paid video poll failed %d times: %s. %s", solanaMaxPaidPollRefusals, string(paidBody), resumeNote())}
+			}
+			wait = pollRetryAfter(paidResp.Header, interval)
+		case paidResp.StatusCode == http.StatusOK:
+			// A 200 that is neither completed nor failed: keep polling.
+		default:
+			return nil, &APIError{StatusCode: paidResp.StatusCode, Message: fmt.Sprintf("Poll failed: %s. %s", string(paidBody), resumeNote())}
+		}
+	}
+
+	return nil, &APIError{
+		StatusCode: http.StatusGatewayTimeout,
+		Message:    fmt.Sprintf("Video generation did not complete within %.0fs (last status: %s). %s", videoPollBudget.Seconds(), lastStatus, resumeNote()),
+	}
+}
+
+// signFromChallenge signs a Solana payment from a poll's 402, on a blockhash
+// fetched now. A challenge with no usable requirements falls back to the submit's
+// payment terms, which the gateway quoted for the same job.
+func (c *VideoClient) signFromChallenge(header http.Header, body []byte, pollURL string, pay *imagePayment) (string, *PaymentOption, error) {
+	option, resourceURL, description, extensions := pay.option, pollURL, pay.description, pay.extensions
+	if raw := paymentRequirementsFrom(header.Get("payment-required"), body); raw != "" {
+		req, err := ParsePaymentRequired(raw)
+		if err != nil {
+			return "", nil, err
+		}
+		if option, err = c.extractPaymentDetails(req); err != nil {
+			return "", nil, err
+		}
+		// The job was quoted at submit. Selection only checks the chain family, and
+		// the signer transfers whichever mint it is handed, while spend tracking
+		// reads the amount as six-decimal USDC.
+		if option.Asset != pay.option.Asset || option.Network != pay.option.Network {
+			return "", nil, fmt.Errorf("the completion challenge asks for asset %s on %s, but the job was submitted with %s on %s",
+				option.Asset, option.Network, pay.option.Asset, pay.option.Network)
+		}
+		description, extensions = req.Resource.Description, req.Extensions
+		if req.Resource.URL != "" {
+			resourceURL = req.Resource.URL
+		}
+	}
+	payload, err := c.signPayment(option, resourceURL, description, extensions, false)
+	if err != nil {
+		return "", nil, err
+	}
+	return payload, option, nil
 }

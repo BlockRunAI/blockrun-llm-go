@@ -1,6 +1,6 @@
 # BlockRun Go SDK
 
-> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->90<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request — no subscription, no seats, no minimum.
+> **blockrun-llm-go** is the full Go SDK for BlockRun: <!-- br:models.chatVisible -->91<!-- /br:models.chatVisible --> chat models, plus image, video, music, speech, voice calls, web search, market data, prediction markets, DeFi and DEX data, and JSON-RPC to <!-- br:chains.rpc -->40<!-- /br:chains.rpc --> chains. Every call is paid per request — no subscription, no seats, no minimum.
 >
 > **Two ways to pay, same SDK, same catalogue.** Sign up at
 > **[user.blockrun.ai](https://user.blockrun.ai)** for an API key and prepaid
@@ -10,9 +10,9 @@
 >
 > The module keeps the name `blockrun-llm-go` because in Go the repository name *is* the import path, and renaming it would break every existing consumer. The SDK stopped being LLM-only long before v0.19.
 >
-> 🆓 **Includes <!-- br:models.free -->7<!-- /br:models.free --> fully-free models** — Nemotron 3 Ultra 550B and Nemotron 3.5 Lightning (1M context), Nemotron 3 Nano Omni (vision), Llama 3.2 11B Vision, Cohere North Mini Code, Poolside Laguna XS 2.1. Zero USDC. Use `blockrun.RoutingFree` or call any free model by ID.
+> 🆓 **Includes <!-- br:models.free -->8<!-- /br:models.free --> fully-free models** — Nemotron 3 Ultra 550B, Nemotron 3.5 Lightning and MiniMax M3.1 Flash (1M context), Nemotron 3 Nano Omni, Nemotron 3.5 Super and Bolt (vision), Muse Glimmer 30B, Poolside Laguna XS 2.1. Zero USDC. Use `blockrun.RoutingFree` or call any free model by ID.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/blockrunai/blockrun-llm-go.svg)](https://pkg.go.dev/github.com/blockrunai/blockrun-llm-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/BlockRunAI/blockrun-llm-go.svg)](https://pkg.go.dev/github.com/BlockRunAI/blockrun-llm-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## Installation
@@ -86,16 +86,17 @@ fmt.Println(result.Model)          // the model that actually answered
 fmt.Println(result.Response) // "4"
 ```
 
-**Free models** (input + output both $0, from the live `/v1/models` catalog, 2026-10-20):
+**Free models** (input + output both $0, from the live `/v1/models` catalog, 2026-11-06):
 
 | Model ID | Context | Best For |
 |----------|---------|----------|
 | `nvidia/nemotron-3.5-lightning` | 1M | Thinking-mode reasoning, long context |
 | `nvidia/nemotron-3-ultra-550b` | 1M | Largest free model — 550B / 55B active MoE reasoning |
 | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | 256K | Multimodal reasoning — text, images, video, audio |
-| `nvidia/llama-3.2-11b-vision` | 128K | Meta Llama 3.2 vision |
+| `nvidia/minimax-m3.1-flash` | 1M | MiniMax M3.1 Flash — reasoning and coding |
+| `nvidia/nemotron-3-super-120b` | 131K | Nemotron 3.5 Super — reasoning, coding, vision |
+| `nvidia/nemotron-3.5-bolt` | 131K | Fast coding model that reads images |
 | `nvidia/muse-glimmer-30b` | 131K | Meta Muse Glimmer 30B |
-| `cohere/north-mini-code` | 256K | Compact coding model |
 | `poolside/laguna-xs-2.1` | 131K | Fast compact coding model |
 
 A free model's `available` field in `/v1/models` is the gateway's live health
@@ -235,7 +236,7 @@ co-signs (gasless) and settles. Constructors: `NewLLMClientSolana`,
 `NewAnthropicClientSolana`, `NewImageClientSolana`, `NewVideoClientSolana`,
 `NewSpeechClientSolana`, `NewMusicClientSolana`, `NewVoiceClientSolana`,
 `NewPhoneClientSolana`, `NewRealFaceClientSolana`, `NewPortraitClientSolana`,
-`NewSurfClientSolana`, `NewRPCClientSolana`.
+`NewRPCClientSolana`.
 
 When a 402 offers more than one chain, the client picks the option matching its
 own chain rather than the first one listed. A 402 that offers no option this
@@ -272,7 +273,7 @@ itself works on both chains.
 An API key from **[user.blockrun.ai](https://user.blockrun.ai)** replaces the
 wallet entirely: no chain, no signing, no on-chain settlement. It is the same
 catalogue and the same SDK — chat, streaming, images, video, speech, music,
-search, Exa, RPC, DeFi, DEX, Surf, prediction markets, phone, voice, the
+search, Exa, RPC, DeFi, DEX, prediction markets, phone, voice, the
 Anthropic Messages client, all of it.
 
 ### Getting one
@@ -365,7 +366,7 @@ host you configured for a different rail.
 | Feature | Description |
 |---------|-------------|
 | **Two payment rails** | API key + prepaid credit (`user.blockrun.ai`), or x402 USDC from your own wallet on Solana / Base |
-| **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->90<!-- /br:models.chatVisible --> models |
+| **Chat & Completion** | OpenAI-compatible chat with <!-- br:models.chatVisible -->91<!-- /br:models.chatVisible --> models |
 | **Anthropic Client** | Native Anthropic Messages API with automatic x402 payments |
 | **Smart Routing** | Auto-selects the best model for your prompt |
 | **Streaming** | SSE streaming for real-time responses |
@@ -381,7 +382,6 @@ host you configured for a different rail.
 | **RealFace** | Enroll a real person's likeness (on-phone liveness, no KYC) as a Seedance face asset |
 | **Voice Calls** | AI-powered outbound phone calls (Bland.ai upstream) |
 | **Phone Lookup + Numbers** | Twilio carrier/fraud lookup + provisioned numbers for caller-ID |
-| **Surf (asksurf.ai)** | ~83 endpoints: exchange data, on-chain SQL, prediction markets, wallet/social analytics |
 | **Response Caching** | Local cache with per-endpoint TTL |
 | **Cost Tracking** | Session spending + persistent JSONL log |
 | **Balance Checking** | Query USDC balance on Solana or Base (wallet rail; credit balance is on the dashboard) |
@@ -484,6 +484,16 @@ result, err := client.ChatCompletion(ctx, "openai/gpt-4o", messages, &blockrun.C
 fmt.Println(result.Choices[0].Message.Content)
 ```
 
+### Reasoning effort
+
+`ReasoningEffort` sets `reasoning_effort` on chat, streaming and `SmartChat`. Left unset, the model's default applies, and on some models that is the most expensive setting (reasoning tokens bill as output).
+
+```go
+resp, err := client.ChatCompletion(ctx, "moonshot/kimi-k3.1-pro", messages, &blockrun.ChatCompletionOptions{
+    ReasoningEffort: blockrun.ReasoningLow,
+})
+```
+
 ## Smart Routing (ClawRouter)
 
 Auto-selects the best model based on prompt complexity analysis — all routing is local, <1ms.
@@ -524,10 +534,8 @@ resp, err := client.SmartChat(ctx, "Prove P != NP", &blockrun.SmartChatOptions{
 > Free routing, 2026-10-20: the free tiers follow the Python SDK's free table
 > (nano-omni for Simple, nemotron-3.5-lightning for the rest). When a primary's
 > health breaker is open, the gateway reroutes the call along its free ladder
-> (nemotron-3-super-120b → nemotron-3-nano-omni-30b-a3b-reasoning →
-> llama-3.2-11b-vision). `result.Model` reports the model that served the
-> call and `result.RequestedModel` the primary the router chose. `nvidia/nemotron-3-super-120b` is hidden
-> from the catalog and is never routed to directly.
+> to a healthy free model. `result.Model` reports the model that served the
+> call and `result.RequestedModel` the primary the router chose.
 > `moonshot/kimi-k2.7` is hidden from the catalog: **eco** Simple moved to
 > `google/gemini-2.5-flash-lite` and **auto** Simple to `google/gemini-2.5-flash`.
 > Under load the gateway can still refuse a free call with `FREE_MODEL_FAILED`.
@@ -591,7 +599,8 @@ if len(result.Choices[0].Message.ToolCalls) > 0 {
 // Simple search
 result, err := client.Search(ctx, "latest AI news", nil)
 fmt.Println(result.Summary)
-fmt.Println(result.Citations)
+fmt.Println(result.Citations)       // URLs
+fmt.Println(result.CitationSources) // URLs with titles
 
 // With options
 result, err := client.Search(ctx, "Go 1.23 features", &blockrun.SearchOptions{
@@ -601,39 +610,41 @@ result, err := client.Search(ctx, "Go 1.23 features", &blockrun.SearchOptions{
 })
 ```
 
-## Market Data (Pyth)
-
-Realtime quotes and OHLC history for crypto, FX, commodities and 12 global
-equity markets. Crypto / FX / commodity are free across price, history and
-list; equities (`stocks/{market}` and the `usstock` alias) charge $0.001
-per price or history call. The client handles x402 transparently on both
-paths — `NewLLMClient` still requires a wallet for the paid routes.
+Sources are `web` (the default) and `news`. A Solana client can also pass `x`,
+at a higher flat price that applies to the whole call; a Base client gets a 400
+before any quote, so on Base search X in chat, on an `xai/*` model:
 
 ```go
-// Free — BTC spot price
+resp, err := client.ChatCompletion(ctx, "xai/grok-4.3", messages, &blockrun.ChatCompletionOptions{
+    Tools: []blockrun.Tool{{
+        Type:            "x_search",
+        AllowedXHandles: []string{"OpenAI", "xai"},
+        FromDate:        "2026-10-04",
+    }},
+})
+```
+
+`web_search` works the same way, with `AllowedDomains` / `ExcludedDomains`. Both
+run on `xai/*` models only.
+
+## Market Data (Pyth)
+
+Realtime quotes and OHLC history for crypto, FX and commodities, free across
+price, history and list.
+
+BlockRun does not serve equity prices at the moment: `CategoryStocks` and
+`CategoryUSStock` price and history calls answer `501 no_data_source` on both
+gateways.
+
+```go
+// BTC spot price
 btc, err := client.Price(ctx, blockrun.CategoryCrypto, "BTC-USD", nil)
 fmt.Println(btc.Price)
 
-// Paid — US equity quote (market is required for CategoryStocks)
-aapl, err := client.Price(ctx, blockrun.CategoryStocks, "AAPL",
-    &blockrun.PriceOptions{Market: "us"})
-
-// Historical bars (free for crypto, paid for stocks)
-bars, err := client.History(ctx, blockrun.CategoryStocks, "AAPL",
-    &blockrun.HistoryOptions{
-        PriceOptions: blockrun.PriceOptions{Market: "us"},
-        Resolution:   "D",
-        From:         1700000000,
-        To:           1710000000,
-    })
-
-// Discovery — always free
+// Discovery
 symbols, err := client.ListSymbols(ctx, blockrun.CategoryCrypto,
     &blockrun.ListOptions{Query: "sol", Limit: 20})
 ```
-
-Supported markets for `CategoryStocks`: `us, hk, jp, kr, gb, de, fr, nl,
-ie, lu, cn, ca`.
 
 ## Multi-chain RPC
 
@@ -690,6 +701,9 @@ answer, err := client.ExaAnswer(ctx, "What is x402?", nil)
 ```
 
 ## DeFi Data (Powered by DefiLlama)
+
+Base and the account rail only: a Solana wallet client returns a
+`*ValidationError` without sending anything. The same goes for DEX swaps below.
 
 GET passthrough to DefiLlama — protocols, TVL, yields, token prices.
 $0.005/call ($0.001 for price lookups).
@@ -856,9 +870,12 @@ Live per-model prices: [blockrun.ai/pricing](https://blockrun.ai/pricing) (agent
 | Model | Notes |
 | ------- | --- |
 | `xai/grok-imagine-video` |  |
+| `xai/grok-imagine-video-1.5` |  |
 | `bytedance/seedance-1.5-pro` | 5s default, up to 10s, 720p |
+| `bytedance/seedance-2.0-mini` |  |
 | `bytedance/seedance-2.0-fast` | ~60-80s gen, sweet-spot price/quality |
 | `bytedance/seedance-2.0` | 720p Pro |
+| `bytedance/seedance-2.5` | Up to 30 reference images, MP4 or MOV |
 
 ```go
 videoClient, err := blockrun.NewVideoClient("")
@@ -893,7 +910,7 @@ result, err = videoClient.Generate(ctx, "the flower blooms in golden morning lig
     LastFrameURL: "https://example.com/bloom.jpg",
 })
 
-// Omni / multi-reference (Seedance 2.0 only): up to 9 reference images
+// Omni / multi-reference (Seedance 2.x): up to 9 reference images (30 on 2.5)
 // for character/style consistency. Cite them as "image 1", "image 2" in
 // the prompt. Mutually exclusive with ImageURL / LastFrameURL /
 // RealFaceAssetID.
@@ -906,7 +923,21 @@ result, err = videoClient.Generate(ctx, "the character from image 1 walks throug
 })
 ```
 
-The client blocks until the video is ready (30-120s typical; Seedance is hard-capped at 85s upstream) because the gateway handles async polling internally.
+The client blocks until the video is ready (30-120s typical; Seedance is hard-capped at 85s upstream) and polls the job for you. Nothing is charged until the job completes, so a failed job costs nothing. On Solana the polls carry a wallet ownership proof, and one payment is signed when the job finishes.
+
+Seedance controls, checked per model before anything is sent:
+
+| Option | Models | Values |
+| ------- | --- | --- |
+| `ReferenceImageURLs` | 2.0 / 2.0-fast / 2.0-mini (up to 9), 2.5 (up to 30) | URLs |
+| `ReferenceVideos`, `ReferenceAudios` | 2.0 / 2.0-fast / 2.0-mini / 2.5 | Up to 3 of each; audio needs a reference image or video |
+| `BitrateMode` | 2.0 / 2.0-fast / 2.0-mini / 2.5 | `standard`, `high` |
+| `OutputFormat` | 2.5 | `mp4`, `mov` |
+| `CameraFixed` | 1.5-pro | `*bool` |
+| `SafetyIdentifier` | any Seedance | string |
+| `InputType` | any | `text`, `image`, `first_last_frame`, `reference` |
+
+Reference clips bill per reference second at the model's ceiling whatever their real length (15.2s on the 2.0 family, 30.2s on 2.5), because the gateway only sees URLs. A single clip can cost several times the render, so read the quote first. With `ReturnLastFrame`, `Data[0].LastFrameURL` carries the final frame.
 
 ## Virtual Portraits
 
@@ -1016,41 +1047,12 @@ _, _ = phone.ReleaseNumber(ctx, bought.PhoneNumber) // free, returns to pool
 
 Failed buys never charge your wallet — settlement is held until Twilio confirms the purchase.
 
-## Surf (asksurf.ai)
+## Surf (retired)
 
-`SurfClient` wraps `/v1/surf/*` — a single backend partner exposing **~83 crypto-intelligence endpoints** (exchange data, on-chain SQL, prediction markets, wallet/social analytics, project intelligence). Tiered pricing matches the backend:
-
-| Tier | Price | Examples |
-|------|-------|----------|
-| **1** | $0.001 | `market/ranking`, `exchange/price`, `news/feed`, `prediction-market/polymarket/markets` |
-| **2** | $0.005 | `token/holders`, `social/mindshare`, `search/web`, `wallet/detail` |
-| **3** | $0.020 | `onchain/sql`, `onchain/query`, `onchain/schema` |
-
-```go
-surf, err := blockrun.NewSurfClient("")
-
-// Discovery
-for _, e := range blockrun.SurfEndpoints() {
-    fmt.Printf("%-50s %s tier=%d $%.3f\n", e.Path, e.Method, e.Tier, e.PriceUSD)
-}
-price, _ := blockrun.SurfPrice("onchain/sql") // 0.020
-
-// GET — pass query params (any value; converted to strings, []string joined with comma)
-top, err := surf.Get(ctx, "market/ranking", map[string]any{"limit": 20})
-btc, err := surf.Get(ctx, "exchange/price",  map[string]any{"pair": "BTC/USDT"})
-
-// POST — JSON body
-sql, err := surf.Post(ctx, "onchain/sql", map[string]any{
-    "query": "SELECT count() FROM ethereum.blocks",
-})
-
-// Generic helper — auto-routes GET vs POST from the catalog
-out, err := surf.Call(ctx, "token/holders", blockrun.SurfCallOptions{
-    Params: map[string]any{"address": "0x...", "chain": "ethereum"},
-})
-```
-
-Required-param validation runs client-side before the network round trip (e.g. `exchange/price` requires `pair`), so missing params surface as a `*ValidationError` instead of a 400 round-trip.
+The gateway retired the Surf endpoints on 2026-09-06: every `/v1/surf/*` call
+answers `410 endpoint_retired`. `SurfClient` is deprecated and will be removed.
+Use `client.Price` for prices, `client.Defi` for DeFi data, `client.PM` for
+prediction markets and `client.Dex` for DEX quotes.
 
 ## Response Caching
 
@@ -1093,6 +1095,8 @@ them) and `TotalUSD` books only the families that publish a settled `price` in
 their body — images and video. Treat it as a floor;
 [user.blockrun.ai/dashboard](https://user.blockrun.ai/dashboard) is the
 authority on what an account has spent.
+
+A paid call the gateway served without settling books $0. It says so with `X-Settlement-Skipped` or `X-Payment-Waived`, for example an empty prediction-market result, a JSON-RPC call that never ran, or a free model answering a paid chat.
 
 ## Balance Checking
 
@@ -1156,13 +1160,13 @@ Prices are not listed here — they change often. See
 
 | Provider | Chat models |
 |----------|-------------|
-| **OpenAI** | GPT-6 Astra / Sol / Luna (1.05M ctx), GPT-5.6 Sol / Terra / Luna (+ Pro), GPT-5.5 (+ Pro), ChatGPT Instant, GPT-5.4 (+ Pro, Mini, Nano), GPT-5.2 (+ Pro), GPT-5.1, GPT-5.3 Codex, GPT-5 Mini, GPT-4.1 family, GPT-4o / 4o-mini, o1, o3, o3-mini, o4-mini |
+| **OpenAI** | GPT-6.1 Sol, GPT-6 Astra / Sol / Luna (1.05M ctx), GPT-5.6 Sol / Terra / Luna (+ Pro), GPT-5.5 (+ Pro), ChatGPT Instant, GPT-5.4 (+ Pro, Mini, Nano), GPT-5.2 (+ Pro), GPT-5.1, GPT-5.3 Codex, GPT-5 Mini, GPT-4.1 family, GPT-4o / 4o-mini, o1, o3, o3-mini, o4-mini |
 | **Anthropic** | Claude Fable 5.1, Fable 5, Opus 5.5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.5, Sonnet 5.5, Sonnet 5, Sonnet 4.6, Sonnet 4.5, Haiku 4.5 |
-| **Google** | Gemini 3.1 Pro, 3.8 Flash, 3.6 Flash, 3.5 Flash, 3 Flash Preview, 3.5 Flash Lite, 3.1 Flash Lite, 2.5 Pro, 2.5 Flash, 2.5 Flash Lite |
+| **Google** | Gemini 4 Argon, 3.1 Pro, 3.8 Flash, 3.6 Flash, 3.5 Flash, 3 Flash Preview, 3.5 Flash Lite, 3.1 Flash Lite, 2.5 Pro, 2.5 Flash, 2.5 Flash Lite |
 | **xAI** | Grok 4.7, Grok 4.6, Grok 4.5 (500K ctx, Live Search), Grok 4.3 (1M), Grok Build 0.1 (agentic coding) |
 | **DeepSeek** | DeepSeek V4.1 Flash (`deepseek-v4.1-flash`; also as `deepseek-chat` / `deepseek-reasoner`), V4 Pro, V4 Flash Vision (experimental) |
-| **Moonshot / MiniMax / Z.ai / Qwen / Xiaomi** | Kimi K3; MiniMax M3, M2.7; GLM-5.3, 5.3 Flash, 5.2, 5.1, 5, 5 Turbo; Qwen3.7 Max / Plus / Flash, Qwen3.8 Flash; MiMo V2.5, V2.5 Pro |
-| **Free** (<!-- br:models.free -->7<!-- /br:models.free --> models, $0) | Nemotron 3.5 Lightning, Nemotron 3 Ultra 550B, Nemotron 3 Nano Omni, Llama 3.2 11B Vision, Cohere North Mini Code, Poolside Laguna XS 2.1 |
+| **Moonshot / MiniMax / Z.ai / Qwen / Xiaomi / Mistral / Tencent / Poolside** | Kimi K3.1 Pro; MiniMax M3, M2.7; GLM-5.3, 5.3 Flash, 5.2, 5.1, 5, 5 Turbo; Qwen3.8 Max / Flash, Qwen3.7 Max / Plus / Flash; MiMo V2.5, V2.5 Pro; Mistral Large 4; Tencent Hy4 Preview; Laguna S 2.1 |
+| **Free** (<!-- br:models.free -->8<!-- /br:models.free --> models, $0) | Nemotron 3.5 Lightning, Super and Bolt, Nemotron 3 Ultra 550B, Nemotron 3 Nano Omni, MiniMax M3.1 Flash, Muse Glimmer 30B, Poolside Laguna XS 2.1 |
 | **ElevenLabs** (speech) | Flash v2.5, Turbo v2.5, Multilingual v2, v3 TTS; Sound Effects |
 
 Use `client.ListModels(ctx)` for the full list.
@@ -1233,7 +1237,7 @@ if err != nil {
 ## FAQ
 
 **What is blockrun-llm-go?**
-The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->90<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Pay with an API key and prepaid credit, or with x402 micropayments from your own wallet. No subscriptions either way. The `-llm-` in the name is history, not scope.
+The Go SDK for the whole BlockRun API — <!-- br:models.chatVisible -->91<!-- /br:models.chatVisible --> chat models, image, video, music, speech, voice calls, multi-chain RPC, web search, market data, prediction markets, DeFi and DEX data. Pay with an API key and prepaid credit, or with x402 micropayments from your own wallet. No subscriptions either way. The `-llm-` in the name is history, not scope.
 
 **Do I need a crypto wallet?**
 No. Sign up at [user.blockrun.ai](https://user.blockrun.ai), mint an API key, top up with a card, and `export BLOCKRUN_API_KEY=brk_live_…`. See [API Keys & Accounts](#api-keys--accounts-userblockrunai). A wallet is the other option, not a requirement.
@@ -1248,7 +1252,7 @@ No. Nothing changes unless you set `BLOCKRUN_API_KEY` — and passing a wallet k
 Yes, and Solana is the recommended chain: settlement is sub-second and BlockRun's facilitator pays the fee, so you hold no SOL. Every client has a `NewXClientSolana` counterpart — same API, same responses. See [Pay on Solana](#pay-on-solana). Base works identically and is still what the bare `NewLLMClient` constructor uses.
 
 **How much does it cost?**
-Pay only for what you use. <!-- br:models.free -->7<!-- /br:models.free --> NVIDIA-hosted models are completely free (DeepSeek V4 Pro/Flash, Nemotron Nano Omni vision, Qwen3, Llama 4, GLM-4.7, Mistral). $5 of credit or USDC gets you thousands of paid-model requests.
+Pay only for what you use. <!-- br:models.free -->8<!-- /br:models.free --> models are completely free (Nemotron, MiniMax M3.1 Flash, Muse Glimmer, Laguna XS). $5 of credit or USDC gets you thousands of paid-model requests.
 
 **Is streaming supported?**
 Yes. Use `ChatCompletionStream` for SSE streaming — on both rails.
@@ -1260,7 +1264,7 @@ Yes. Use `ChatCompletionStream` for SSE streaming — on both rails.
 - [Documentation](https://github.com/BlockRunAI/awesome-blockrun/tree/main/docs)
 - [Python SDK](https://github.com/blockrunai/blockrun-llm)
 - [TypeScript SDK](https://github.com/blockrunai/blockrun-llm-ts)
-- [GitHub](https://github.com/blockrunai/blockrun-llm-go)
+- [GitHub](https://github.com/BlockRunAI/blockrun-llm-go)
 - [Telegram](https://t.me/+mroQv4-4hGgzOGUx)
 
 ## License

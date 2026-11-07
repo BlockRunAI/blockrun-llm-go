@@ -72,6 +72,8 @@ type SmartChatOptions struct {
 	MaxTokens      int
 	Temperature    float64
 	RoutingProfile RoutingProfile
+	// ReasoningEffort is sent as reasoning_effort; see ChatCompletionOptions.
+	ReasoningEffort ReasoningEffort
 }
 
 // routingTable maps (profile, tier) to the model to use.
@@ -131,8 +133,9 @@ type SmartChatOptions struct {
 //
 // Free tier, 2026-10-20: follows the sibling SDKs' free table (blockrun-llm
 // router_adapter.py FREE_TIERS; router-core has no free profile) instead of
-// pinning one model. nvidia/nemotron-3-super-120b stays out: it is hidden:true
-// in the gateway (models.ts), so /v1/models does not list it.
+// pinning one model. nvidia/nemotron-3-super-120b stays out of the table: it was
+// hidden when this was written, and though /v1/models lists it again since
+// 2026-11, the sibling SDKs' table does not route to it.
 //
 // A free model listed with available:false is NOT delisted. That flag is the
 // gateway's per-instance free-health circuit breaker (/v1/models reports
@@ -142,10 +145,9 @@ type SmartChatOptions struct {
 // a requested free model whose breaker is open to the first usable,
 // capability-compatible rung of its rescue ladder (chat/completions/route.ts,
 // pickFreeRescue over FREE_RESCUE_LADDER), and if the call itself fails it
-// cascades nemotron-3-super-120b -> nemotron-3-nano-omni-30b-a3b-reasoning ->
-// llama-3.2-11b-vision within a 90s budget. A client retry on top of that
+// cascades through its free ladder within a 90s budget. A client retry on top of that
 // would only stack waits. So each tier names the sibling SDKs' primary, and
-// the gateway's ladder supplies the fallbacks, ending at llama-3.2-11b-vision.
+// the gateway's ladder supplies the fallbacks.
 // When the gateway reroutes, SmartChatResponse.Model reports the model that
 // served the call (see servedModel) and RequestedModel keeps the primary.
 var routingTable = map[RoutingProfile]map[RoutingTier]string{
@@ -169,13 +171,13 @@ var routingTable = map[RoutingProfile]map[RoutingTier]string{
 
 // Precompiled regex patterns for the scoring dimensions.
 var (
-	reCode       = regexp.MustCompile("(?i)(```|def |func |class |import |const |let |var |function |return |if\\s*\\(|for\\s*\\(|\\{\\s*\\n|=>|->)")
-	reReasoning  = regexp.MustCompile("(?i)(explain|why|how does|analyze|compare|evaluate|assess|reason|justify|proof|derive|theorem|hypothesis)")
-	reTechnical  = regexp.MustCompile("(?i)(algorithm|database|API|kubernetes|docker|microservice|architecture|infrastructure|latency|throughput|scalab|distribut|concurren)")
-	reCreative   = regexp.MustCompile("(?i)(write a (poem|story|song|essay)|creative|imagine|fiction|narrative|brainstorm)")
-	reSimple     = regexp.MustCompile("(?i)^(hi|hello|hey|thanks|thank you|yes|no|ok|okay|sure|what time|what day|how are you|goodbye|bye)\\b")
-	reMultiStep  = regexp.MustCompile("(?i)(step[- ]by[- ]step|first[,.].*then|1\\.|\\bplan\\b.*\\bfor\\b|multi[- ]step|breakdown|walk me through|outline the process)")
-	reAgentic    = regexp.MustCompile("(?i)(search (for|the)|look up|find (me|the|all)|browse|fetch|retrieve|scrape|crawl|automate|execute|run the)")
+	reCode      = regexp.MustCompile("(?i)(```|def |func |class |import |const |let |var |function |return |if\\s*\\(|for\\s*\\(|\\{\\s*\\n|=>|->)")
+	reReasoning = regexp.MustCompile("(?i)(explain|why|how does|analyze|compare|evaluate|assess|reason|justify|proof|derive|theorem|hypothesis)")
+	reTechnical = regexp.MustCompile("(?i)(algorithm|database|API|kubernetes|docker|microservice|architecture|infrastructure|latency|throughput|scalab|distribut|concurren)")
+	reCreative  = regexp.MustCompile("(?i)(write a (poem|story|song|essay)|creative|imagine|fiction|narrative|brainstorm)")
+	reSimple    = regexp.MustCompile("(?i)^(hi|hello|hey|thanks|thank you|yes|no|ok|okay|sure|what time|what day|how are you|goodbye|bye)\\b")
+	reMultiStep = regexp.MustCompile("(?i)(step[- ]by[- ]step|first[,.].*then|1\\.|\\bplan\\b.*\\bfor\\b|multi[- ]step|breakdown|walk me through|outline the process)")
+	reAgentic   = regexp.MustCompile("(?i)(search (for|the)|look up|find (me|the|all)|browse|fetch|retrieve|scrape|crawl|automate|execute|run the)")
 )
 
 // scorePrompt computes a complexity score for the given prompt.
@@ -307,7 +309,16 @@ func (c *LLMClient) SmartChat(ctx context.Context, prompt string, opts *SmartCha
 	}
 	messages = append(messages, ChatMessage{Role: "user", Content: prompt})
 
-	resp, headers, err := c.chatCompletionHeaders(ctx, decision.Model, messages, nil)
+	var chatOpts *ChatCompletionOptions
+	if opts != nil {
+		chatOpts = &ChatCompletionOptions{
+			MaxTokens:       opts.MaxTokens,
+			Temperature:     opts.Temperature,
+			ReasoningEffort: opts.ReasoningEffort,
+		}
+	}
+
+	resp, headers, err := c.chatCompletionHeaders(ctx, decision.Model, messages, chatOpts)
 	if err != nil {
 		return nil, err
 	}

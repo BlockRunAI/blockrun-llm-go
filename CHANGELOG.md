@@ -2,6 +2,88 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## Unreleased
+
+Catches up with `@blockrun/llm` 3.26.1, `blockrun-llm` 1.21.3 and the current
+sol.blockrun.ai contract.
+
+### Fixed: payments and spend
+
+- **`Search` no longer fails after the charge.** Both gateways send `citations` as
+  `{url, title}` objects, and `SearchResult.Citations []string` could not decode
+  them, so every paid search returned an error once the money had moved.
+  `Citations` keeps the URLs; the new `CitationSources` adds titles.
+- **A paid call the gateway did not settle books $0.** Any `X-Settlement-Skipped`
+  or `X-Payment-Waived` (`free-fallback`, `empty-result`, `unexecuted`, later
+  reasons) now keeps the call out of `GetSpending` and the cost log, on chat,
+  streams, paid GET and POST, RPC, and every media path. Proof of settlement (a
+  receipt with a transaction or a charge, or `X-Payment-Receipt`) beats the
+  header and is logged. `false`, `0`, `no` and `none` are not skips, and
+  `X-Payment-Settled: false` alone is still booked.
+- **Solana video polls with an ownership proof and pays once.** It signed a fresh
+  payment on repeated polls, and a payment on a re-poll can charge again when the
+  gateway's settlement record is unavailable. Polls now carry `x-poll-*`; a
+  finished job's 402 is paid once. A settlement the gateway holds is retried up
+  to 4 times, a verification refusal stops, and a clip that settled but could not
+  be delivered stops and is booked. A gateway that refuses the proof falls back
+  to pay-per-poll for that job.
+- **Only `exact` options are signed.** sol.blockrun.ai also offers
+  `batch-settlement`. Selection used to ignore the scheme, so a change in the
+  gateway's order would have signed an exact transfer against batch terms. A 402
+  offering no `exact` option is now an error.
+- **Errors say what is known about the money.** "API error after payment" read as
+  lost funds. Failures now report the gateway's `payment_status`, or a settled
+  transaction, or say to check the wallet. A paid request lost in transit says it
+  may have settled. A failed job no longer claims "no payment was taken" when
+  `payment_status` says otherwise.
+
+### Fixed: slow jobs
+
+- **`MusicClient` follows a slow track on Base and the account rail.** The 202 was
+  reported as an error, after payment on Base and after billing on the account
+  rail, which invited a paying retry. `TxHash` now reads `x-payment-receipt`
+  (also on `SpeechClient`).
+- **A paid poll is not abandoned on one bad answer.** Image and video polls on Base
+  and the account rail gave up on a dropped connection or any 5xx. All of them now
+  share one loop: 502/503/504 and 202 keep polling and honour `Retry-After`,
+  dropped connections, other 5xx and 429 get 5 tries in a row, and a status of
+  `failed` stops at once at any HTTP code. A timeout after a lost answer no longer
+  promises nothing was charged.
+- A Solana poll answering 202 with no result is pending even if it says
+  `completed`: the gateway sends that while a settlement is landing.
+
+### Fixed: other
+
+- `SmartChat` ignored `SmartChatOptions.MaxTokens` and `Temperature`.
+- Reference images were capped at 9 on every model; `seedance-2.5` takes 30.
+- `solanaPaidMediaPost` checked the wrong error after encoding its body.
+- DefiLlama and 0x calls on a Solana wallet client now return a `*ValidationError`
+  instead of the Solana gateway's HTML 404.
+
+### Added
+
+- `ChatCompletionOptions.ReasoningEffort` and `SmartChatOptions.ReasoningEffort`,
+  sent as `reasoning_effort`. Unset sends nothing.
+- Native xAI search tools in `Tool`: `{Type: "x_search"}` and
+  `{Type: "web_search"}` with their filters. `SearchParameters.MaxTurns`, and image
+  and video understanding on `SearchSource`. A leading `@` on a handle is stripped.
+- Seedance: `ReferenceVideos`, `ReferenceAudios`, `BitrateMode`, `OutputFormat`,
+  `CameraFixed`, `SafetyIdentifier`, `InputType`, checked per model before sending,
+  and `VideoClip.LastFrameURL` / `LastFrameBackedUp`.
+- CI runs vet, gofmt and `go test -race` on every push and pull request.
+
+### Deprecated
+
+- `SurfClient`, `NewSurfClient`, `NewSurfClientSolana`: the gateway has answered
+  `410 endpoint_retired` since 2026-09-06.
+
+### Docs
+
+- Equity price and history answer `501 no_data_source` on both gateways; the README
+  no longer sells them.
+- `/v1/search` sources: `web` and `news`, plus `x` on Solana only.
+- README free list and model tables follow the 2026-11-06 catalog.
+
 ## 0.23.0
 
 - **docs(deepseek): `deepseek/deepseek-v4.1-flash` is the canonical id** for

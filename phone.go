@@ -88,16 +88,16 @@ func NewPhoneClient(privateKey string, opts ...PhoneClientOption) (*PhoneClient,
 // PhoneLookupResponse is the Twilio Lookup payload. The shape varies by request
 // type (basic vs fraud), so fields are loosely typed; access raw values via Extra.
 type PhoneLookupResponse struct {
-	PhoneNumber  string                 `json:"phone_number,omitempty"`
-	CallerName   map[string]any         `json:"caller_name,omitempty"`
-	Carrier      map[string]any         `json:"carrier,omitempty"`
-	CountryCode  string                 `json:"country_code,omitempty"`
-	NationalFmt  string                 `json:"national_format,omitempty"`
-	LineType     map[string]any         `json:"line_type_intelligence,omitempty"`
-	SimSwap      map[string]any         `json:"sim_swap,omitempty"`
-	CallFwd      map[string]any         `json:"call_forwarding,omitempty"`
-	TxHash       string                 `json:"txHash,omitempty"`
-	Extra        map[string]any         `json:"-"`
+	PhoneNumber string         `json:"phone_number,omitempty"`
+	CallerName  map[string]any `json:"caller_name,omitempty"`
+	Carrier     map[string]any `json:"carrier,omitempty"`
+	CountryCode string         `json:"country_code,omitempty"`
+	NationalFmt string         `json:"national_format,omitempty"`
+	LineType    map[string]any `json:"line_type_intelligence,omitempty"`
+	SimSwap     map[string]any `json:"sim_swap,omitempty"`
+	CallFwd     map[string]any `json:"call_forwarding,omitempty"`
+	TxHash      string         `json:"txHash,omitempty"`
+	Extra       map[string]any `json:"-"`
 }
 
 // NumberBuyResponse is returned by BuyNumber once a number has been provisioned.

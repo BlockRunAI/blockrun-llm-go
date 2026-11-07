@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/mr-tron/base58"
@@ -367,7 +366,7 @@ func TestCreateSolanaPaymentPayloadBlockhashRPCFailure(t *testing.T) {
 // server-provided-blockhash fast path must NOT leak into async poll re-signs.
 //
 // extra.recentBlockhash is pinned to the moment the 402 was issued and expires
-// within ~1-2 minutes. pollPaymentPayload exists to re-sign long image/video
+// within ~1-2 minutes. signPayment(allowServerBlockhash=false) exists to re-sign long image/video
 // jobs with a FRESH blockhash; if it honored the server value it would hand
 // back the same expiring hash forever and the settling tx would be expired.
 func TestPollPaymentPayloadForcesFreshBlockhash(t *testing.T) {
@@ -399,13 +398,12 @@ func TestPollPaymentPayloadForcesFreshBlockhash(t *testing.T) {
 	}
 
 	// A re-sign past the interval must fetch a fresh blockhash instead.
-	stale := time.Now().Add(-2 * solanaPollResignInterval)
-	resigned, lastSigned := bc.pollPaymentPayload(submitted, stale, opt, "https://x/r", "", nil)
-	if resigned == submitted {
-		t.Fatal("poll did not re-sign past the resign interval")
+	resigned, err := bc.signPayment(opt, "https://x/r", "", nil, false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if lastSigned.Equal(stale) {
-		t.Error("lastSigned was not advanced after a re-sign")
+	if resigned == submitted {
+		t.Fatal("a forced re-sign returned the submit's payload")
 	}
 	got := decodePaymentTx(t, resigned).Message.RecentBlockhash
 	if got == serverHash {

@@ -61,9 +61,12 @@ const (
 	CategoryFX PriceCategory = "fx"
 	// CategoryCommodity — free across price, history and list (XAU, XAG, XPT, WTI, …).
 	CategoryCommodity PriceCategory = "commodity"
-	// CategoryUSStock — legacy alias for stocks/us (paid price+history, free list).
+	// CategoryUSStock — legacy alias for stocks/us. Both gateways currently answer
+	// equity price and history with 501 no_data_source.
 	CategoryUSStock PriceCategory = "usstock"
 	// CategoryStocks — global equities; requires Market (us/hk/jp/kr/gb/de/fr/nl/ie/lu/cn/ca).
+	// Both gateways currently answer equity price and history with 501
+	// no_data_source: BlockRun does not serve equity prices at the moment.
 	CategoryStocks PriceCategory = "stocks"
 )
 

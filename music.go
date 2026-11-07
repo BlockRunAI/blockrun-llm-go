@@ -14,16 +14,17 @@ const (
 	DefaultMusicModel = "minimax/music-2.5+"
 
 	// Available music models (pass as MusicGenerateOptions.Model):
-	//   minimax/music-2.5+   $0.1575/track, ~3 min, vocals or instrumental
-	//   minimax/music-2.5    $0.1575/track
+	//   minimax/music-2.5+   ~3 min, vocals or instrumental
+	// Live prices: https://blockrun.ai/models
 
 	// DefaultMusicTimeout is the default timeout for music generation
 	// (music gen takes 1-3 minutes).
 	DefaultMusicTimeout = 210 * time.Second
 
-	// musicPollInterval and musicPollBudget bound the Solana slow path: a track
-	// that is not done within the gateway's ~60s inline window answers 202
-	// { id, poll_url } and is polled to completion.
+	// musicPollInterval and musicPollBudget bound the slow path on Solana: a
+	// track that is not done within the gateway's ~60s inline window answers 202
+	// { id, poll_url } and is polled to completion. Base and the account rail use
+	// jobPollInterval and jobPollBudget.
 	musicPollInterval = 3 * time.Second
 	musicPollBudget   = 300 * time.Second
 )
@@ -31,7 +32,7 @@ const (
 // MusicClient is the BlockRun Music Generation client.
 //
 // Generates full-length (~3 minute) music tracks using MiniMax Music 2.5+
-// with automatic x402 micropayments on Base chain. Pricing: $0.1575/track.
+// with automatic x402 micropayments. Pricing: https://blockrun.ai/models
 //
 // Generated URLs expire in ~24h — download immediately if you need to keep
 // the track.
@@ -170,12 +171,12 @@ func (c *MusicClient) Generate(ctx context.Context, prompt string, opts *MusicGe
 	}
 
 	var respBytes []byte
+	var headers http.Header
 	var err error
 	paid := false
 	if c.isSolana() {
 		// sol.blockrun.ai settles at the POST and detaches a slow track to
-		// 202 { id, poll_url }. doRequest knows only 200, so it reported that
-		// paid 202 as an error and a retry paid twice. Follow the job instead.
+		// 202 { id, poll_url }, followed here with the wallet's ownership proof.
 		interval := c.pollInterval
 		if interval <= 0 {
 			interval = musicPollInterval
@@ -183,7 +184,8 @@ func (c *MusicClient) Generate(ctx context.Context, prompt string, opts *MusicGe
 		respBytes, paid, err = c.solanaPaidMediaPost(ctx, "/v1/audio/generations", body,
 			pollKindAudio, "Music generation", musicPollBudget, interval)
 	} else {
-		respBytes, err = c.doRequest(ctx, "/v1/audio/generations", body)
+		// Base and the account rail: doRequestHeaders follows a slow track's 202.
+		respBytes, headers, err = c.doRequestHeaders(ctx, "/v1/audio/generations", body)
 	}
 	if err != nil {
 		return nil, err
@@ -196,6 +198,9 @@ func (c *MusicClient) Generate(ctx context.Context, prompt string, opts *MusicGe
 			return nil, fmt.Errorf("failed to decode response: %w. Payment was settled at submit; check your wallet before submitting again", err)
 		}
 		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	if musicResp.TxHash == "" {
+		musicResp.TxHash = headers.Get("x-payment-receipt")
 	}
 	if musicResp.TxHash == "" {
 		// A slow Solana track's completed poll reports the POST's settlement as

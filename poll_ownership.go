@@ -12,6 +12,8 @@ import (
 
 // Solana poll-ownership proof (sol.blockrun.ai src/lib/poll-ownership.ts).
 //
+// Video polls use it too, with their own contract: see followSolanaVideoJob.
+//
 // sol.blockrun.ai settles image and music payments at the POST: a signed Solana
 // transaction is pinned to a recent blockhash (~60-90s of life), far too short
 // to wait out a slow render. A slow job answers 202 { id, poll_url } and the
@@ -39,6 +41,9 @@ const (
 	// proof against. Music jobs are "audio" (the route is /v1/audio/...).
 	pollKindImage = "image"
 	pollKindAudio = "audio"
+	// pollKindVideo: a video poll with a proof is read-only. Video settles on the
+	// one payment sent for the finished job.
+	pollKindVideo = "video"
 )
 
 // pollAuthMessage is the exact UTF-8 text the gateway verifies.

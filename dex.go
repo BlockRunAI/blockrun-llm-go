@@ -24,6 +24,9 @@ func (c *LLMClient) Dex(ctx context.Context, path string, params map[string]stri
 	if strings.TrimSpace(path) == "" {
 		return nil, &ValidationError{Field: "path", Message: "Path is required"}
 	}
+	if err := c.requireBaseGateway("0x DEX"); err != nil {
+		return nil, err
+	}
 
 	respBytes, err := c.doGetWithPayment(ctx, "/v1/zerox/"+path, params)
 	if err != nil {
@@ -63,6 +66,9 @@ func (c *LLMClient) DexGaslessQuote(ctx context.Context, params map[string]strin
 func (c *LLMClient) DexGaslessSubmit(ctx context.Context, body map[string]any) (map[string]any, error) {
 	if len(body) == 0 {
 		return nil, &ValidationError{Field: "body", Message: "Signed trade body is required"}
+	}
+	if err := c.requireBaseGateway("0x DEX"); err != nil {
+		return nil, err
 	}
 
 	respBytes, err := c.doRequest(ctx, "/v1/zerox/gasless/submit", body)

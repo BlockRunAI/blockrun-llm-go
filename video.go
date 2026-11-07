@@ -16,11 +16,16 @@ const (
 	DefaultVideoModel = "xai/grok-imagine-video"
 
 	// Available video models (pass as VideoGenerateOptions.Model):
-	//   xai/grok-imagine-video       $0.05/sec, 8s default
-	//   bytedance/seedance-1.5-pro   $0.03/sec, 5s default up to 10s, 720p
-	//   bytedance/seedance-2.0-fast  $0.15/sec, ~60-80s gen, sweet spot
-	//   bytedance/seedance-2.0       $0.30/sec, 720p Pro
-	// The client passes Model through; no enum gating.
+	//   xai/grok-imagine-video       8s default
+	//   xai/grok-imagine-video-1.5
+	//   bytedance/seedance-1.5-pro   5s default up to 10s, 720p
+	//   bytedance/seedance-2.0-mini
+	//   bytedance/seedance-2.0-fast  ~60-80s gen, sweet spot
+	//   bytedance/seedance-2.0       720p Pro
+	//   bytedance/seedance-2.5
+	// Live prices: https://blockrun.ai/models
+	// The client passes Model through; per-model checks cover only the
+	// Seedance fields (validateVideoOptions).
 
 	// DefaultVideoTimeout is the default per-HTTP-call timeout (submit or a
 	// single poll). The overall generate budget is videoPollBudget.
@@ -128,11 +133,31 @@ type VideoGenerateOptions struct {
 	// Priced identically to image-to-video. Mutually exclusive with
 	// RealFaceAssetID.
 	LastFrameURL string `json:"last_frame_url,omitempty"`
-	// ReferenceImageURLs is the omni / multi-reference input: up to 9
-	// reference image URLs for character/style consistency (Seedance 2.0
-	// only). Cite them as "image 1", "image 2" in the prompt. Mutually
-	// exclusive with ImageURL / LastFrameURL / RealFaceAssetID.
+	// ReferenceImageURLs is the omni / multi-reference input for
+	// character/style consistency: up to 9 images on Seedance 2.0 / 2.0-fast /
+	// 2.0-mini, up to 30 on 2.5. Cite them as "image 1", "image 2" in the
+	// prompt. Mutually exclusive with ImageURL / LastFrameURL / RealFaceAssetID.
 	ReferenceImageURLs []string `json:"reference_image_urls,omitempty"`
+	// ReferenceVideos and ReferenceAudios are reference clips, up to 3 of each,
+	// on Seedance 2.0 / 2.0-fast / 2.0-mini / 2.5. Audio needs a reference image
+	// or video in the same request. Each clip bills at the model's reference
+	// ceiling whatever its real length (15.2s on the 2.0 family, 30.2s on 2.5),
+	// because the gateway only sees URLs: check the quote before relying on them.
+	ReferenceVideos []VideoReferenceClip `json:"reference_videos,omitempty"`
+	ReferenceAudios []VideoReferenceClip `json:"reference_audios,omitempty"`
+	// BitrateMode is "standard" or "high" (Seedance 2.0 / 2.0-fast / 2.0-mini / 2.5).
+	BitrateMode string `json:"bitrate_mode,omitempty"`
+	// OutputFormat is "mp4" or "mov" (Seedance 2.5; every other model returns MP4).
+	OutputFormat string `json:"output_format,omitempty"`
+	// CameraFixed pins the camera (Seedance 1.5 Pro).
+	CameraFixed *bool `json:"camera_fixed,omitempty"`
+	// SafetyIdentifier is a stable end-user id for the provider's safety
+	// systems (any Seedance model).
+	SafetyIdentifier string `json:"safety_identifier,omitempty"`
+	// InputType asserts the mode you intend: "text", "image",
+	// "first_last_frame" or "reference". The gateway refuses a request whose
+	// fields imply another mode instead of generating the wrong thing.
+	InputType string `json:"input_type,omitempty"`
 	// DurationSeconds is the duration to bill for (defaults to model's default duration).
 	DurationSeconds int `json:"duration_seconds,omitempty"`
 	// AspectRatio overrides the output aspect ratio — "adaptive" / "16:9" /
@@ -157,6 +182,13 @@ type VideoGenerateOptions struct {
 	ReturnLastFrame bool `json:"return_last_frame,omitempty"`
 }
 
+// VideoReferenceClip is one reference video or audio clip.
+type VideoReferenceClip struct {
+	URL string `json:"url"`
+	// Role is "reference", or empty.
+	Role string `json:"role,omitempty"`
+}
+
 // VideoClip represents a single generated video clip.
 type VideoClip struct {
 	// URL is the permanent blockrun-hosted URL
@@ -170,6 +202,11 @@ type VideoClip struct {
 	RequestID string `json:"request_id,omitempty"`
 	// BackedUp is true when the gateway mirrored the video to its GCS bucket.
 	BackedUp bool `json:"backed_up,omitempty"`
+	// LastFrameURL is the final frame as an image, when ReturnLastFrame was set
+	// and the upstream returned one.
+	LastFrameURL string `json:"last_frame_url,omitempty"`
+	// LastFrameBackedUp is true when the gateway mirrored that frame.
+	LastFrameBackedUp bool `json:"last_frame_backed_up,omitempty"`
 }
 
 // VideoResponse represents the API response for video generation.
@@ -227,19 +264,8 @@ func (c *VideoClient) Generate(ctx context.Context, prompt string, opts *VideoGe
 				Message: "LastFrameURL and RealFaceAssetID are mutually exclusive; first-and-last-frame uses ImageURL + LastFrameURL",
 			}
 		}
-		if len(opts.ReferenceImageURLs) > 0 {
-			if opts.ImageURL != "" || opts.LastFrameURL != "" || opts.RealFaceAssetID != "" {
-				return nil, &ValidationError{
-					Field:   "ReferenceImageURLs",
-					Message: "ReferenceImageURLs is mutually exclusive with ImageURL, LastFrameURL, and RealFaceAssetID",
-				}
-			}
-			if len(opts.ReferenceImageURLs) > 9 {
-				return nil, &ValidationError{
-					Field:   "ReferenceImageURLs",
-					Message: "ReferenceImageURLs accepts at most 9 images",
-				}
-			}
+		if err := validateVideoOptions(opts); err != nil {
+			return nil, err
 		}
 		if opts.Model != "" {
 			body["model"] = opts.Model
@@ -252,6 +278,27 @@ func (c *VideoClient) Generate(ctx context.Context, prompt string, opts *VideoGe
 		}
 		if len(opts.ReferenceImageURLs) > 0 {
 			body["reference_image_urls"] = opts.ReferenceImageURLs
+		}
+		if len(opts.ReferenceVideos) > 0 {
+			body["reference_videos"] = opts.ReferenceVideos
+		}
+		if len(opts.ReferenceAudios) > 0 {
+			body["reference_audios"] = opts.ReferenceAudios
+		}
+		if opts.BitrateMode != "" {
+			body["bitrate_mode"] = opts.BitrateMode
+		}
+		if opts.OutputFormat != "" {
+			body["output_format"] = opts.OutputFormat
+		}
+		if opts.CameraFixed != nil {
+			body["camera_fixed"] = *opts.CameraFixed
+		}
+		if opts.SafetyIdentifier != "" {
+			body["safety_identifier"] = opts.SafetyIdentifier
+		}
+		if opts.InputType != "" {
+			body["input_type"] = opts.InputType
 		}
 		if opts.RealFaceAssetID != "" {
 			body["real_face_asset_id"] = opts.RealFaceAssetID
@@ -336,9 +383,10 @@ func (c *VideoClient) GenerateFromContent(ctx context.Context, content []map[str
 
 // submitVideoAndPoll runs the async video pipeline shared by Generate and
 // GenerateFromContent: POST submit (402 -> sign -> 202 { id, poll_url }), then
-// GET-poll poll_url with the same wallet's PAYMENT-SIGNATURE until the job
-// reaches "completed". The gateway settles only on the first completed poll, so
-// upstream failure or a caller giving up costs nothing.
+// poll until the job reaches "completed": with the same PAYMENT-SIGNATURE on Base,
+// with an ownership proof and one payment on completion on Solana. The gateway
+// settles only on completion, so upstream failure or a caller giving up costs
+// nothing.
 func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string, body map[string]any) (*VideoResponse, error) {
 	submitURL := c.apiURL + submitPath
 
@@ -435,7 +483,7 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 		}
 	}
 
-	return c.pollVideoJob(ctx, submitPath, body2, resp2.StatusCode, &videoPayment{
+	return c.pollVideoJob(ctx, submitPath, body2, resp2.StatusCode, &imagePayment{
 		option:      paymentOption,
 		payload:     paymentPayload,
 		resourceURL: resourceURL,
@@ -444,160 +492,136 @@ func (c *VideoClient) submitVideoAndPoll(ctx context.Context, submitPath string,
 	})
 }
 
-// videoPayment carries the x402 context a poll loop needs to keep re-proving
-// payment. It is nil on the account rail, where the API key does that job.
-type videoPayment struct {
-	option      *PaymentOption
-	payload     string
-	resourceURL string
-	description string
-	extensions  map[string]any
-}
-
-// pollVideoJob GET-polls an async video job to a terminal state.
-//
-// Shared by both rails: the loop is identical apart from how each poll
-// authenticates — a PAYMENT-SIGNATURE the wallet keeps fresh, or the API key —
-// and where the charge is read from. `pay` is nil on the account rail.
+// pollVideoJob follows an async video job to a terminal state. `pay` is nil on
+// the account rail.
 func (c *VideoClient) pollVideoJob(
 	ctx context.Context,
 	submitPath string,
 	submitBody []byte,
 	submitStatus int,
-	pay *videoPayment,
+	pay *imagePayment,
 ) (*VideoResponse, error) {
-	var submitData struct {
-		ID      string `json:"id"`
-		PollURL string `json:"poll_url"`
-		Status  string `json:"status"`
-	}
-	if err := json.Unmarshal(submitBody, &submitData); err != nil {
-		return nil, fmt.Errorf("failed to decode submit response: %w", err)
-	}
-	if submitData.ID == "" || submitData.PollURL == "" {
-		return nil, &APIError{
-			StatusCode: submitStatus,
-			Message:    fmt.Sprintf("submit response missing id/poll_url: %s", string(submitBody)),
-		}
+	// Solana polls with an ownership proof and pays once, on completion.
+	if pay != nil && c.isSolana() {
+		return c.followSolanaVideoJob(ctx, submitPath, submitBody, submitStatus, pay)
 	}
 
-	pollURL, pollErr := c.absoluteURL(submitData.PollURL)
-	if pollErr != nil {
-		return nil, pollErr
+	body, header, err := c.pollAsyncJob(ctx, asyncJob{
+		label:        "Video generation",
+		endpoint:     submitPath,
+		submitBody:   submitBody,
+		submitStatus: submitStatus,
+		pay:          pay,
+		budget:       videoPollBudget,
+		interval:     c.pollInterval,
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	// Step 4: poll until completed. Base reuses the submit signature; Solana
-	// re-signs with a fresh blockhash once the current one nears expiry.
-	deadline := time.Now().Add(videoPollBudget)
-	lastStatus := submitData.Status
-	if lastStatus == "" {
-		lastStatus = "queued"
-	}
-	var pollSig string
-	if pay != nil {
-		pollSig = pay.payload
-	}
-	lastSigned := time.Now()
-
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(c.pollInterval):
-		}
-
-		pollReq, err := http.NewRequestWithContext(ctx, "GET", pollURL, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create poll request: %w", err)
-		}
-		if pay != nil {
-			pollSig, lastSigned = c.pollPaymentPayload(pollSig, lastSigned, pay.option, pay.resourceURL, pay.description, pay.extensions)
-			pollReq.Header.Set("PAYMENT-SIGNATURE", pollSig)
-		}
-		c.applyAuth(pollReq)
-		pollResp, err := c.httpClient.Do(pollReq)
-		if err != nil {
-			return nil, fmt.Errorf("poll request failed: %w", err)
-		}
-		pollBytes, _ := io.ReadAll(pollResp.Body)
-		pollResp.Body.Close()
-
-		if pollResp.StatusCode == http.StatusPaymentRequired && pay == nil {
-			return nil, apiKeyPaymentError(pollBytes)
-		}
-
-		var pollData map[string]any
-		_ = json.Unmarshal(pollBytes, &pollData)
-		if s, ok := pollData["status"].(string); ok && s != "" {
-			lastStatus = s
-		}
-
-		if pollResp.StatusCode == http.StatusAccepted && (lastStatus == "queued" || lastStatus == "in_progress") {
-			continue
-		}
-		if lastStatus == "failed" {
-			return nil, &APIError{
-				StatusCode: pollResp.StatusCode,
-				Message:    fmt.Sprintf("Upstream generation failed: %s", string(pollBytes)),
-			}
-		}
-		// Terminal success is keyed on status, NOT the HTTP code — the gateway
-		// settles on-chain the moment a poll reports "completed", so coupling
-		// success to a literal 200 would spin to the deadline (and return a
-		// "not charged" error) on a completed-but-non-200 poll, even though the
-		// caller was already charged. Record the cost as soon as completion is
-		// observed (the charge is irreversible at that point), then decode.
-		if lastStatus == "completed" {
-			if pay != nil {
-				c.recordVideoCost(pay.option.Amount, submitPath)
-			} else {
-				c.recordAPIKeyCost(pollBytes, submitPath)
-			}
-			var videoResp VideoResponse
-			if err := json.Unmarshal(pollBytes, &videoResp); err != nil {
-				return nil, fmt.Errorf("failed to decode response: %w", err)
-			}
-			if tx := pollResp.Header.Get("x-payment-receipt"); tx != "" {
-				videoResp.TxHash = tx
-			}
-			return &videoResp, nil
-		}
-		// 504 on a poll = transient upstream hiccup; keep polling. Any other
-		// non-2xx is a hard failure.
-		if pollResp.StatusCode != http.StatusOK &&
-			pollResp.StatusCode != http.StatusAccepted &&
-			pollResp.StatusCode != http.StatusGatewayTimeout {
-			return nil, &APIError{
-				StatusCode: pollResp.StatusCode,
-				Message:    fmt.Sprintf("Poll failed: %s", string(pollBytes)),
-			}
-		}
-	}
-
-	// "No payment was taken" is true only on the wallet rail, where the gateway
-	// settles on the first completed poll and giving up therefore costs
-	// nothing. The account rail charges credit at submit, so promising the
-	// opposite there would be a refund the customer never gets.
-	unpaid := " No payment was taken."
-	if pay == nil {
-		unpaid = ""
-	}
-	return nil, &APIError{
-		StatusCode: http.StatusGatewayTimeout,
-		Message: fmt.Sprintf(
-			"Video generation did not complete within %.0fs (last status: %s).%s",
-			videoPollBudget.Seconds(), lastStatus, unpaid,
-		),
-	}
+	return decodeVideoResponse(body, header)
 }
 
-// absoluteURL resolves a server-supplied relative poll_url against the API host.
-func (c *VideoClient) absoluteURL(u string) (string, error) {
-	return c.resolvePollURL(u)
+// decodeVideoResponse unmarshals a completed video poll and attaches the
+// settlement receipt from the X-Payment-Receipt header when present.
+func decodeVideoResponse(body []byte, header http.Header) (*VideoResponse, error) {
+	var videoResp VideoResponse
+	if err := json.Unmarshal(body, &videoResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	if tx := header.Get("x-payment-receipt"); tx != "" {
+		videoResp.TxHash = tx
+	}
+	return &videoResp, nil
 }
 
-// recordVideoCost tracks spending for a completed video job, mirroring the
-// accounting baseClient does for synchronous paid calls.
-func (c *VideoClient) recordVideoCost(amount, submitPath string) {
-	c.recordSettledCost(amount, submitPath)
+// Seedance capabilities per model, mirroring the gateway registry. Everything
+// here the gateway would also refuse; on the account rail nothing else runs
+// before the key is billed.
+const (
+	seedance25    = "bytedance/seedance-2.5"
+	seedance15Pro = "bytedance/seedance-1.5-pro"
+	// seedanceMaxReferenceClips is the per-type clip ceiling.
+	seedanceMaxReferenceClips = 3
+)
+
+// seedanceReferenceImageLimit is also the set of models with reference media and
+// bitrate_mode: the Seedance 2.x family.
+var seedanceReferenceImageLimit = map[string]int{
+	"bytedance/seedance-2.0":      9,
+	"bytedance/seedance-2.0-fast": 9,
+	"bytedance/seedance-2.0-mini": 9,
+	seedance25:                    30,
+}
+
+// validateVideoOptions refuses a request the gateway would refuse, before
+// anything is sent or signed.
+func validateVideoOptions(opts *VideoGenerateOptions) error {
+	model := opts.Model
+	if model == "" {
+		model = DefaultVideoModel
+	}
+	fail := func(field, format string, args ...any) error {
+		return &ValidationError{Field: field, Message: fmt.Sprintf(format, args...)}
+	}
+	limit, seedance2x := seedanceReferenceImageLimit[model]
+
+	hasClips := len(opts.ReferenceVideos) > 0 || len(opts.ReferenceAudios) > 0
+	if len(opts.ReferenceImageURLs) > 0 || hasClips {
+		if opts.ImageURL != "" || opts.LastFrameURL != "" || opts.RealFaceAssetID != "" {
+			return fail("ReferenceImageURLs", "reference inputs are mutually exclusive with ImageURL, LastFrameURL, and RealFaceAssetID")
+		}
+		if !seedance2x {
+			return fail("Model", "model %s does not accept reference media; use a Seedance 2.x model", model)
+		}
+	}
+	if len(opts.ReferenceImageURLs) > limit && seedance2x {
+		return fail("ReferenceImageURLs", "ReferenceImageURLs accepts at most %d images on %s", limit, model)
+	}
+	for _, list := range []struct {
+		field string
+		clips []VideoReferenceClip
+	}{{"ReferenceVideos", opts.ReferenceVideos}, {"ReferenceAudios", opts.ReferenceAudios}} {
+		if len(list.clips) > seedanceMaxReferenceClips {
+			return fail(list.field, "%s accepts at most %d clips", list.field, seedanceMaxReferenceClips)
+		}
+		for _, clip := range list.clips {
+			if !strings.HasPrefix(clip.URL, "https://") && !strings.HasPrefix(clip.URL, "http://") {
+				return fail(list.field, "%s must be http(s) URLs", list.field)
+			}
+			if clip.Role != "" && clip.Role != "reference" {
+				return fail(list.field, "%s role must be \"reference\" or empty", list.field)
+			}
+		}
+	}
+	if len(opts.ReferenceAudios) > 0 && len(opts.ReferenceImageURLs) == 0 && len(opts.ReferenceVideos) == 0 {
+		return fail("ReferenceAudios", "ReferenceAudios requires a reference image or video in the same request")
+	}
+	if opts.BitrateMode != "" {
+		if opts.BitrateMode != "standard" && opts.BitrateMode != "high" {
+			return fail("BitrateMode", "BitrateMode must be standard or high")
+		}
+		if !seedance2x {
+			return fail("BitrateMode", "BitrateMode requires a Seedance 2.x model; got %s", model)
+		}
+	}
+	if opts.OutputFormat != "" {
+		if opts.OutputFormat != "mp4" && opts.OutputFormat != "mov" {
+			return fail("OutputFormat", "OutputFormat must be mp4 or mov")
+		}
+		if model != seedance25 {
+			return fail("OutputFormat", "OutputFormat requires %s; every other model returns MP4", seedance25)
+		}
+	}
+	if opts.CameraFixed != nil && model != seedance15Pro {
+		return fail("CameraFixed", "CameraFixed requires %s; got %s", seedance15Pro, model)
+	}
+	if opts.SafetyIdentifier != "" && !strings.HasPrefix(model, "bytedance/seedance-") {
+		return fail("SafetyIdentifier", "SafetyIdentifier requires a Seedance model; got %s", model)
+	}
+	switch opts.InputType {
+	case "", "text", "image", "first_last_frame", "reference":
+	default:
+		return fail("InputType", "InputType must be text, image, first_last_frame or reference")
+	}
+	return nil
 }

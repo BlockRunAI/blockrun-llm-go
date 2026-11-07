@@ -189,7 +189,7 @@ func (c *SpeechClient) Generate(ctx context.Context, input string, opts *SpeechG
 	}
 	body["model"] = model
 
-	respBytes, err := c.doRequest(ctx, "/v1/audio/speech", body)
+	respBytes, headers, err := c.doRequestHeaders(ctx, "/v1/audio/speech", body)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +197,9 @@ func (c *SpeechClient) Generate(ctx context.Context, input string, opts *SpeechG
 	var speechResp SpeechResponse
 	if err := json.Unmarshal(respBytes, &speechResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	if speechResp.TxHash == "" {
+		speechResp.TxHash = headers.Get("x-payment-receipt")
 	}
 
 	return &speechResp, nil
@@ -232,7 +235,7 @@ func (c *SpeechClient) SoundEffect(ctx context.Context, text string, opts *Sound
 	}
 	body["model"] = model
 
-	respBytes, err := c.doRequest(ctx, "/v1/audio/sound-effects", body)
+	respBytes, headers, err := c.doRequestHeaders(ctx, "/v1/audio/sound-effects", body)
 	if err != nil {
 		return nil, err
 	}
@@ -240,6 +243,9 @@ func (c *SpeechClient) SoundEffect(ctx context.Context, text string, opts *Sound
 	var speechResp SpeechResponse
 	if err := json.Unmarshal(respBytes, &speechResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	if speechResp.TxHash == "" {
+		speechResp.TxHash = headers.Get("x-payment-receipt")
 	}
 
 	return &speechResp, nil

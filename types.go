@@ -11,6 +11,7 @@ package blockrun
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // jsonUnmarshal is aliased so the Model UnmarshalJSON can call encoding/json
@@ -42,7 +43,27 @@ type ChatCompletionOptions struct {
 	ToolChoice       any               `json:"tool_choice,omitempty"`     // string ("none","auto","required") or object
 	ResponseFormat   any               `json:"response_format,omitempty"` // e.g. map[string]string{"type": "json_object"} for JSON mode
 	Stop             any               `json:"stop,omitempty"`            // string or []string — up to 4 stop sequences
+	// ReasoningEffort sets how hard a reasoning model thinks. Unset sends nothing
+	// and the model's default applies. That default can be the most expensive
+	// setting: Reflection Beam defaults to "max", and reasoning tokens bill as output.
+	ReasoningEffort ReasoningEffort `json:"reasoning_effort,omitempty"`
 }
+
+// ReasoningEffort is a reasoning_effort value. The gateway passes it through and
+// each model accepts its own subset: xhigh and max exist on a few (Reflection
+// Beam, Z.ai GLM), none and minimal only on models that can stop reasoning.
+type ReasoningEffort string
+
+// The reasoning_effort values.
+const (
+	ReasoningNone    ReasoningEffort = "none"
+	ReasoningMinimal ReasoningEffort = "minimal"
+	ReasoningLow     ReasoningEffort = "low"
+	ReasoningMedium  ReasoningEffort = "medium"
+	ReasoningHigh    ReasoningEffort = "high"
+	ReasoningXHigh   ReasoningEffort = "xhigh"
+	ReasoningMax     ReasoningEffort = "max"
+)
 
 // SearchParameters contains xAI Live Search configuration.
 type SearchParameters struct {
@@ -52,6 +73,7 @@ type SearchParameters struct {
 	FromDate         string         `json:"from_date,omitempty"` // YYYY-MM-DD
 	ToDate           string         `json:"to_date,omitempty"`   // YYYY-MM-DD
 	MaxSearchResults int            `json:"max_search_results,omitempty"`
+	MaxTurns         int            `json:"max_turns,omitempty"`
 }
 
 // SearchSource represents a search source configuration.
@@ -61,19 +83,90 @@ type SearchSource struct {
 	ExcludedWebsites []string `json:"excluded_websites,omitempty"`
 	AllowedWebsites  []string `json:"allowed_websites,omitempty"`
 	SafeSearch       bool     `json:"safe_search,omitempty"`
-	// X-specific fields
-	IncludedXHandles  []string `json:"included_x_handles,omitempty"`
-	ExcludedXHandles  []string `json:"excluded_x_handles,omitempty"`
-	PostFavoriteCount int      `json:"post_favorite_count,omitempty"`
-	PostViewCount     int      `json:"post_view_count,omitempty"`
+	// EnableImageUnderstanding applies to "x" and "web" sources.
+	EnableImageUnderstanding bool `json:"enable_image_understanding,omitempty"`
+	// X-specific fields. xAI takes up to 20 handles, allowed or excluded but not
+	// both; a leading @ is stripped before sending. The gateway accepts the
+	// post_*_count filters for compatibility, but xAI has no such filter.
+	IncludedXHandles         []string `json:"included_x_handles,omitempty"`
+	ExcludedXHandles         []string `json:"excluded_x_handles,omitempty"`
+	PostFavoriteCount        int      `json:"post_favorite_count,omitempty"`
+	PostViewCount            int      `json:"post_view_count,omitempty"`
+	EnableVideoUnderstanding bool     `json:"enable_video_understanding,omitempty"`
 	// RSS-specific fields
 	Links []string `json:"links,omitempty"`
 }
 
-// Tool represents a function tool for chat completion.
+// Tool represents a tool for chat completion: a function, or on xai/* models
+// xAI's native search, {Type: "x_search"} or {Type: "web_search"}.
+//
+// The search fields apply only to their type. A leading @ on a handle is
+// stripped before sending.
 type Tool struct {
-	Type     string       `json:"type"` // "function"
+	Type     string       `json:"type"` // "function", "x_search" or "web_search"
 	Function ToolFunction `json:"function"`
+
+	// x_search: up to 20 handles, allowed or excluded but not both.
+	AllowedXHandles  []string
+	ExcludedXHandles []string
+	// x_search: YYYY-MM-DD.
+	FromDate string
+	ToDate   string
+	// web_search.
+	AllowedDomains  []string
+	ExcludedDomains []string
+	// x_search and web_search.
+	EnableImageUnderstanding bool
+	// x_search.
+	EnableVideoUnderstanding bool
+}
+
+// MarshalJSON sends a native search tool in xAI's field names, without the
+// function block, and a function tool exactly as before.
+func (t Tool) MarshalJSON() ([]byte, error) {
+	switch t.Type {
+	case "x_search":
+		return json.Marshal(struct {
+			Type                     string   `json:"type"`
+			AllowedXHandles          []string `json:"allowed_x_handles,omitempty"`
+			ExcludedXHandles         []string `json:"excluded_x_handles,omitempty"`
+			FromDate                 string   `json:"from_date,omitempty"`
+			ToDate                   string   `json:"to_date,omitempty"`
+			EnableImageUnderstanding bool     `json:"enable_image_understanding,omitempty"`
+			EnableVideoUnderstanding bool     `json:"enable_video_understanding,omitempty"`
+		}{t.Type, bareHandles(t.AllowedXHandles), bareHandles(t.ExcludedXHandles), t.FromDate, t.ToDate, t.EnableImageUnderstanding, t.EnableVideoUnderstanding})
+	case "web_search":
+		return json.Marshal(struct {
+			Type                     string   `json:"type"`
+			AllowedDomains           []string `json:"allowed_domains,omitempty"`
+			ExcludedDomains          []string `json:"excluded_domains,omitempty"`
+			EnableImageUnderstanding bool     `json:"enable_image_understanding,omitempty"`
+		}{t.Type, t.AllowedDomains, t.ExcludedDomains, t.EnableImageUnderstanding})
+	}
+	return json.Marshal(struct {
+		Type     string       `json:"type"`
+		Function ToolFunction `json:"function"`
+	}{t.Type, t.Function})
+}
+
+// MarshalJSON strips a leading @ from X handles: xAI wants them bare.
+func (s SearchSource) MarshalJSON() ([]byte, error) {
+	type wire SearchSource
+	w := wire(s)
+	w.IncludedXHandles = bareHandles(s.IncludedXHandles)
+	w.ExcludedXHandles = bareHandles(s.ExcludedXHandles)
+	return json.Marshal(w)
+}
+
+func bareHandles(handles []string) []string {
+	if handles == nil {
+		return nil
+	}
+	out := make([]string, len(handles))
+	for i, h := range handles {
+		out[i] = strings.TrimLeft(strings.TrimSpace(h), "@")
+	}
+	return out
 }
 
 // ToolFunction describes a callable function.

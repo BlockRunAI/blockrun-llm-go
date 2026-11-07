@@ -40,11 +40,11 @@ func TestSearchWithOptions(t *testing.T) {
 		}
 
 		resp := SearchResult{
-			Query:       "latest AI news",
-			Summary:     "Here are the latest AI developments...",
-			Citations:   []string{"https://example.com/article1", "https://example.com/article2"},
-			SourcesUsed: 3,
-			Model:       "blockrun/search-v1",
+			Query:           "latest AI news",
+			Summary:         "Here are the latest AI developments...",
+			CitationSources: []SearchCitation{{URL: "https://example.com/article1"}, {URL: "https://example.com/article2"}},
+			SourcesUsed:     3,
+			Model:           "blockrun/search-v1",
 		}
 		json.NewEncoder(w).Encode(resp)
 	}))

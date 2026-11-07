@@ -100,7 +100,6 @@ func main() {
 	}
 	fmt.Println()
 
-
 	// Example 7: Search
 	fmt.Println("=== Web Search ===")
 	searchResult, err := client.Search(ctx, "latest Go 1.23 features", nil)
