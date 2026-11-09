@@ -10,7 +10,7 @@
 >
 > The module keeps the name `blockrun-llm-go` because in Go the repository name *is* the import path, and renaming it would break every existing consumer. The SDK stopped being LLM-only long before v0.19.
 >
-> 🆓 **Includes <!-- br:models.free -->8<!-- /br:models.free --> fully-free models** — Nemotron 3 Ultra 550B, Nemotron 3.5 Lightning and MiniMax M3.1 Flash (1M context), Nemotron 3 Nano Omni, Nemotron 3.5 Super and Bolt (vision), Muse Glimmer 30B, Poolside Laguna XS 2.1. Zero USDC. Use `blockrun.RoutingFree` or call any free model by ID.
+> 🆓 **Includes <!-- br:models.free -->9<!-- /br:models.free --> fully-free models** — Nemotron 3 Ultra 550B, Nemotron 3.5 Lightning and MiniMax M3.1 Flash (1M context), Nemotron 3 Nano Omni, Nemotron 3.5 Super and Bolt (vision), Muse Glimmer 30B, Poolside Laguna XS 2.1. Zero USDC. Use `blockrun.RoutingFree` or call any free model by ID.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/BlockRunAI/blockrun-llm-go.svg)](https://pkg.go.dev/github.com/BlockRunAI/blockrun-llm-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -1166,7 +1166,7 @@ Prices are not listed here — they change often. See
 | **xAI** | Grok 4.7, Grok 4.6, Grok 4.5 (500K ctx, Live Search), Grok 4.3 (1M), Grok Build 0.1 (agentic coding) |
 | **DeepSeek** | DeepSeek V4.1 Flash (`deepseek-v4.1-flash`; also as `deepseek-chat` / `deepseek-reasoner`), V4 Pro, V4 Flash Vision (experimental) |
 | **Moonshot / MiniMax / Z.ai / Qwen / Xiaomi / Mistral / Tencent / Poolside** | Kimi K3.1 Pro; MiniMax M3, M2.7; GLM-5.3, 5.3 Flash, 5.2, 5.1, 5, 5 Turbo; Qwen3.8 Max / Flash, Qwen3.7 Max / Plus / Flash; MiMo V2.5, V2.5 Pro; Mistral Large 4; Tencent Hy4 Preview; Laguna S 2.1 |
-| **Free** (<!-- br:models.free -->8<!-- /br:models.free --> models, $0) | Nemotron 3.5 Lightning, Super and Bolt, Nemotron 3 Ultra 550B, Nemotron 3 Nano Omni, MiniMax M3.1 Flash, Muse Glimmer 30B, Poolside Laguna XS 2.1 |
+| **Free** (<!-- br:models.free -->9<!-- /br:models.free --> models, $0) | Nemotron 3.5 Lightning, Super and Bolt, Nemotron 3 Ultra 550B, Nemotron 3 Nano Omni, MiniMax M3.1 Flash, Muse Glimmer 30B, Poolside Laguna XS 2.1 |
 | **ElevenLabs** (speech) | Flash v2.5, Turbo v2.5, Multilingual v2, v3 TTS; Sound Effects |
 
 Use `client.ListModels(ctx)` for the full list.
@@ -1252,7 +1252,7 @@ No. Nothing changes unless you set `BLOCKRUN_API_KEY` — and passing a wallet k
 Yes, and Solana is the recommended chain: settlement is sub-second and BlockRun's facilitator pays the fee, so you hold no SOL. Every client has a `NewXClientSolana` counterpart — same API, same responses. See [Pay on Solana](#pay-on-solana). Base works identically and is still what the bare `NewLLMClient` constructor uses.
 
 **How much does it cost?**
-Pay only for what you use. <!-- br:models.free -->8<!-- /br:models.free --> models are completely free (Nemotron, MiniMax M3.1 Flash, Muse Glimmer, Laguna XS). $5 of credit or USDC gets you thousands of paid-model requests.
+Pay only for what you use. <!-- br:models.free -->9<!-- /br:models.free --> models are completely free (Nemotron, MiniMax M3.1 Flash, Muse Glimmer, Laguna XS). $5 of credit or USDC gets you thousands of paid-model requests.
 
 **Is streaming supported?**
 Yes. Use `ChatCompletionStream` for SSE streaming — on both rails.
