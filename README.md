@@ -898,7 +898,7 @@ result, err = videoClient.Generate(ctx, "the spokesperson presents the product",
     Model:           "bytedance/seedance-2.0",
     RealFaceAssetID: "ta_abcdef1234567890",
     Resolution:      "1080p",       // 360p / 480p / 720p / 1080p / 4K
-    GenerateAudio:   &genAudio,     // *bool — nil defers to model default
+    GenerateAudio:   &genAudio,     // *bool — nil = default (on for every Seedance input); false = silent
 })
 
 // First-and-last-frame interpolation (Seedance only): the model tweens

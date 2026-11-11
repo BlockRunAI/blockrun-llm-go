@@ -168,9 +168,9 @@ type VideoGenerateOptions struct {
 	// "1080p" / "4K". Seedance defaults to "720p"; Grok ignores it.
 	Resolution string `json:"resolution,omitempty"`
 	// GenerateAudio toggles synced audio in the output. Seedance defaults to
-	// true for text-to-video and false for image- or face-conditioned
-	// generation; Grok ignores it. Use a pointer so the field can be left
-	// unset (nil) to defer to the model default.
+	// true for every input (text, image, first/last frame, reference media,
+	// RealFace); set false for a silent clip. Grok ignores it. Use a pointer
+	// so the field can be left unset (nil) to take the default.
 	GenerateAudio *bool `json:"generate_audio,omitempty"`
 	// Seed is a deterministic generation seed (Seedance only). Use a pointer
 	// so 0 is a valid explicit seed.
