@@ -2,6 +2,13 @@
 
 All notable changes to blockrun-llm-go will be documented in this file.
 
+## 0.24.1
+
+Docs only. `GenerateAudio`: the gateway now turns synced audio on by default for
+every Seedance input (text, image, first/last frame, reference image, video or
+audio, RealFace), not only text-to-video. Set it to `false` for a silent clip. The
+price does not depend on it.
+
 ## 0.24.0
 
 Catches up with `@blockrun/llm` 3.26.1, `blockrun-llm` 1.21.3 and the current
